@@ -91,3 +91,15 @@ Additional UX refinements:
 8. Verify the source queue item status changes to `done` automatically.
 9. From Patients row actions, click **Create appointment**, fill doctor/date/time, save, and confirm appointment appears instantly.
 10. From appointment row, click **Start Consult** then **Complete/Close Visit** and verify appointment status reaches `completed`.
+
+## Finance workflow (billing + reports)
+1. Go to **Billing** and ensure at least one active service exists in Firestore (`clinics/<clinicId>/services`).
+2. Select patient (or enter walk-in), assign doctor, add one or more service items, set discount if needed.
+3. Save invoice; invoice number is generated atomically from `clinics/<clinicId>/counters/invoices`.
+4. Verify invoice appears immediately in the invoice list.
+5. Open **View/Print** to print receipt from stored invoice data.
+6. Use **Record Payment** to store payment method and amount in `payments`.
+7. Void an issued invoice using **Void** action and reason; status updates to `void`.
+8. Open **Revenue Reports** and select date range preset (Today/Week/Month/Custom).
+9. Validate totals: revenue, invoice count, average invoice, doctor/service breakdowns.
+10. Export CSV for invoice list, doctor totals, and service totals.

@@ -193,35 +193,56 @@ export const createInvoice = async (
   payload: {
     patientId?: string;
     patientName: string;
+    phone?: string;
+    nic?: string;
     doctorId?: string;
     doctorName?: string;
-    items: Array<{ serviceId?: string; name: string; qty: number; price: number }>;
+    visitId?: string;
+    items: Array<{ serviceId?: string; name: string; qty: number; unitPrice: number; lineTotal?: number }>;
     discount?: number;
   },
 ) => {
   const counterRef = doc(db, 'clinics', clinicId, 'counters', 'invoices');
   const invoiceRef = doc(clinicRef(clinicId, 'invoices'));
 
+  const normalizedItems = payload.items.map((item) => {
+    const qty = Math.max(1, Number(item.qty || 1));
+    const unitPrice = Math.max(0, Number(item.unitPrice || 0));
+    return {
+      serviceId: item.serviceId || null,
+      name: item.name,
+      qty,
+      unitPrice,
+      lineTotal: qty * unitPrice,
+    };
+  });
+
+  const subtotal = normalizedItems.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
+  const discount = Math.min(Math.max(0, Number(payload.discount || 0)), subtotal);
+  const total = Math.max(0, subtotal - discount);
+
   const invoiceNumber = await runTransaction(db, async (trx) => {
     const counterSnap = await trx.get(counterRef);
     const seq = (counterSnap.data()?.seq || 0) + 1;
-    const subtotal = payload.items.reduce((sum, it) => sum + Number(it.qty || 0) * Number(it.price || 0), 0);
-    const discount = Number(payload.discount || 0);
-    const total = Math.max(0, subtotal - discount);
     trx.set(counterRef, { seq, updatedAt: serverTimestamp() }, { merge: true });
     trx.set(invoiceRef, {
       invoiceNumber: `INV-${String(seq).padStart(6, '0')}`,
       patientId: payload.patientId || null,
       patientName: payload.patientName,
+      phone: payload.phone || null,
+      nic: payload.nic || null,
       doctorId: payload.doctorId || null,
       doctorName: payload.doctorName || null,
-      items: payload.items,
+      visitId: payload.visitId || null,
+      items: normalizedItems,
       subtotal,
       discount,
       total,
       status: 'issued',
       createdBy: uid,
+      updatedBy: uid,
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     return `INV-${String(seq).padStart(6, '0')}`;
   });
@@ -232,17 +253,86 @@ export const createInvoice = async (
 
 export const voidInvoice = async (
   clinicId: string,
-  invoiceId: string,
   uid: string,
-  email: string | null | undefined,
+  invoiceId: string,
+  reason: string,
+  email?: string | null,
 ) => {
-  await updateDoc(doc(db, 'clinics', clinicId, 'invoices', invoiceId), {
+  const invoiceRef = doc(db, 'clinics', clinicId, 'invoices', invoiceId);
+  const snap = await getDoc(invoiceRef);
+  if (!snap.exists()) throw new Error('Invoice not found');
+  if (snap.data().status === 'void') throw new Error('Invoice already void');
+
+  await updateDoc(invoiceRef, {
     status: 'void',
+    voidReason: reason || 'Not specified',
     voidedBy: uid,
     voidedAt: serverTimestamp(),
+    updatedBy: uid,
+    updatedAt: serverTimestamp(),
   });
   await addAuditLog(clinicId, uid, email, 'void_invoice', 'invoice', invoiceId, 'Voided invoice');
 };
+
+export const recordPayment = async (
+  clinicId: string,
+  uid: string,
+  email: string | null | undefined,
+  payload: {
+    invoiceId: string;
+    invoiceNumber: string;
+    method: 'cash' | 'card' | 'bank' | 'other';
+    amount: number;
+    receivedAt: string;
+  },
+) => {
+  const ref = await addDoc(clinicRef(clinicId, 'payments'), {
+    ...payload,
+    amount: Math.max(0, Number(payload.amount || 0)),
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+  });
+  await addAuditLog(clinicId, uid, email, 'record_payment', 'payment', ref.id, `Payment for ${payload.invoiceNumber}`);
+  return ref;
+};
+
+export const listServicesRealtime = (clinicId: string, cb: (rows: Plain[]) => void) =>
+  onSnapshot(
+    query(clinicRef(clinicId, 'services'), where('active', '==', true), orderBy('name', 'asc')),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const listenInvoicesByRange = (
+  clinicId: string,
+  from: string,
+  to: string,
+  cb: (rows: Plain[]) => void,
+) =>
+  onSnapshot(
+    query(
+      clinicRef(clinicId, 'invoices'),
+      where('createdAt', '>=', new Date(`${from}T00:00:00.000Z`)),
+      where('createdAt', '<=', new Date(`${to}T23:59:59.999Z`)),
+      orderBy('createdAt', 'desc'),
+    ),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const listenPaymentsByRange = (
+  clinicId: string,
+  from: string,
+  to: string,
+  cb: (rows: Plain[]) => void,
+) =>
+  onSnapshot(
+    query(
+      clinicRef(clinicId, 'payments'),
+      where('createdAt', '>=', new Date(`${from}T00:00:00.000Z`)),
+      where('createdAt', '<=', new Date(`${to}T23:59:59.999Z`)),
+      orderBy('createdAt', 'desc'),
+    ),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
 
 export const dispenseFefo = async ({
   clinicId,
