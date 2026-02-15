@@ -79,3 +79,15 @@ Additional UX refinements:
 - Appointments include status/date quick filters for daily time management.
 - Patient drawer supports create + edit modes with duplicate safety callout and direct open-existing CTA.
 - Dispense workflow includes required-field validation and pre-confirmation summary.
+
+## Operations workflow test (manual, 10 steps)
+1. Login with the configured admin account.
+2. Open **Patients** and create a new patient with code, name, phone, and NIC.
+3. Verify the new patient appears immediately in the patient list without refreshing.
+4. In the patient row actions, click **Add to Queue** and confirm patient details are prefilled.
+5. Select a doctor in Queue drawer, create token, and verify token + queue list update instantly.
+6. From queue row actions, click **Start Consult** and confirm navigation to `/consultation?visitId=<id>`.
+7. In Consultation, enter diagnosis/notes/prescription, save, then click **Close Visit**.
+8. Verify the source queue item status changes to `done` automatically.
+9. From Patients row actions, click **Create appointment**, fill doctor/date/time, save, and confirm appointment appears instantly.
+10. From appointment row, click **Start Consult** then **Complete/Close Visit** and verify appointment status reaches `completed`.

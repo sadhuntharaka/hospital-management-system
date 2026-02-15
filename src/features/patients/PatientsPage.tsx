@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
-import { createPatient, subscribeByClinic, updatePatient } from '@/lib/clinicDb';
+import { createPatient, listenPatients, updatePatient } from '@/lib/clinicDb';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -40,7 +40,7 @@ export const PatientsPage = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = subscribeByClinic(DEFAULT_CLINIC_ID, 'patients', (rows) => {
+    const unsub = listenPatients(DEFAULT_CLINIC_ID, (rows) => {
       setData(rows as any[]);
       setIsLoading(false);
     });
@@ -145,8 +145,8 @@ export const PatientsPage = () => {
             ]}
             rowActions={[
               { label: 'Open profile', onClick: (row: any) => navigate(`/patients/${row.id}`) },
-              { label: 'Create appointment', onClick: () => navigate('/appointments') },
-              { label: 'Create invoice', onClick: () => navigate('/billing') },
+              { label: 'Add to Queue', onClick: (row: any) => navigate(`/queue?patientId=${row.id}&patientName=${encodeURIComponent(row.fullName || '')}`) },
+              { label: 'Create appointment', onClick: (row: any) => navigate(`/appointments?patientId=${row.id}&patientName=${encodeURIComponent(row.fullName || '')}`) },
               {
                 label: 'Quick edit',
                 onClick: (row: any) => {

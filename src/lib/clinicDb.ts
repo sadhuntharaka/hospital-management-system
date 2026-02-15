@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   increment,
   limit,
@@ -111,11 +112,13 @@ export const createAppointment = async (
     date: string;
     time?: string;
     status?: 'booked' | 'arrived' | 'in_consult' | 'completed' | 'cancelled';
+    source?: 'appointment';
   },
 ) => {
   const ref = await addDoc(clinicRef(clinicId, 'appointments'), {
     ...payload,
     status: payload.status || 'booked',
+    source: payload.source || 'appointment',
     createdBy: uid,
     updatedBy: uid,
     createdAt: serverTimestamp(),
@@ -351,4 +354,205 @@ export const createStockBatch = async (
     updatedAt: serverTimestamp(),
     quantityOnHand: increment(payload.quantityAvailable),
   });
+};
+
+
+export const listenPatients = (clinicId: string, cb: (rows: Plain[]) => void) =>
+  subscribeByClinic(clinicId, 'patients', cb);
+
+export const listenQueueToday = (clinicId: string, today: string, cb: (rows: Plain[]) => void) =>
+  onSnapshot(
+    query(clinicRef(clinicId, 'queue'), where('date', '==', today), orderBy('tokenNumber', 'asc')),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const addQueueToken = async (
+  clinicId: string,
+  uid: string,
+  payload: {
+    doctorId: string;
+    doctorName: string;
+    patientId?: string;
+    patientName?: string;
+    phone?: string;
+    source?: 'walkin' | 'patient';
+  },
+) => {
+  const dateKey = toDateKey();
+  const counterRef = doc(db, 'clinics', clinicId, 'counters', `queue_${dateKey}`);
+  const queueDocRef = doc(clinicRef(clinicId, 'queue'));
+
+  const token = await runTransaction(db, async (trx) => {
+    const counterSnap = await trx.get(counterRef);
+    const seq = (counterSnap.data()?.seq || 0) + 1;
+    trx.set(counterRef, { seq, updatedAt: serverTimestamp() }, { merge: true });
+    trx.set(queueDocRef, {
+      tokenNumber: seq,
+      date: dateKey,
+      patientId: payload.patientId || null,
+      patientName: payload.patientName || null,
+      phone: payload.phone || null,
+      doctorId: payload.doctorId,
+      doctorName: payload.doctorName,
+      source: payload.source || (payload.patientId ? 'patient' : 'walkin'),
+      status: 'waiting',
+      createdBy: uid,
+      updatedBy: uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return seq;
+  });
+
+  return { id: queueDocRef.id, token };
+};
+
+export const updateQueueStatus = (
+  clinicId: string,
+  queueId: string,
+  uid: string,
+  status: 'waiting' | 'in_consult' | 'done' | 'skipped',
+) => updateQueue(clinicId, queueId, uid, { status });
+
+export const listenAppointments = (
+  clinicId: string,
+  dateFrom: string,
+  dateTo: string,
+  cb: (rows: Plain[]) => void,
+) =>
+  onSnapshot(
+    query(
+      clinicRef(clinicId, 'appointments'),
+      where('date', '>=', dateFrom),
+      where('date', '<=', dateTo),
+      orderBy('date', 'asc'),
+    ),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const updateAppointmentStatus = (
+  clinicId: string,
+  appointmentId: string,
+  uid: string,
+  status: 'booked' | 'arrived' | 'in_consult' | 'completed' | 'cancelled',
+) => updateAppointment(clinicId, appointmentId, uid, { status });
+
+export const createVisitFromQueue = async (
+  clinicId: string,
+  uid: string,
+  queueItem: Plain,
+) => {
+  const existing = await getDocs(
+    query(
+      clinicRef(clinicId, 'visits'),
+      where('sourceRefType', '==', 'queue'),
+      where('sourceRefId', '==', String(queueItem.id || '')),
+      where('status', '==', 'open'),
+      limit(1),
+    ),
+  );
+  if (!existing.empty) {
+    return { id: existing.docs[0].id };
+  }
+
+  const ref = await addDoc(clinicRef(clinicId, 'visits'), {
+    patientId: queueItem.patientId || null,
+    patientName: queueItem.patientName || 'Walk-in',
+    phone: queueItem.phone || null,
+    nic: null,
+    doctorId: queueItem.doctorId,
+    doctorName: queueItem.doctorName,
+    sourceRefType: 'queue',
+    sourceRefId: queueItem.id,
+    status: 'open',
+    diagnosis: '',
+    notes: '',
+    prescription: [],
+    createdBy: uid,
+    updatedBy: uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  if (queueItem.id) {
+    await updateQueueStatus(clinicId, String(queueItem.id), uid, 'in_consult');
+  }
+
+  return { id: ref.id };
+};
+
+export const createVisitFromAppointment = async (
+  clinicId: string,
+  uid: string,
+  apptItem: Plain,
+) => {
+  const existing = await getDocs(
+    query(
+      clinicRef(clinicId, 'visits'),
+      where('sourceRefType', '==', 'appointment'),
+      where('sourceRefId', '==', String(apptItem.id || '')),
+      where('status', '==', 'open'),
+      limit(1),
+    ),
+  );
+  if (!existing.empty) {
+    return { id: existing.docs[0].id };
+  }
+
+  const ref = await addDoc(clinicRef(clinicId, 'visits'), {
+    patientId: apptItem.patientId || null,
+    patientName: apptItem.patientName || 'Unknown',
+    phone: apptItem.phone || null,
+    nic: apptItem.nic || null,
+    doctorId: apptItem.doctorId,
+    doctorName: apptItem.doctorName,
+    sourceRefType: 'appointment',
+    sourceRefId: apptItem.id,
+    status: 'open',
+    diagnosis: '',
+    notes: '',
+    prescription: [],
+    createdBy: uid,
+    updatedBy: uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  if (apptItem.id) {
+    await updateAppointmentStatus(clinicId, String(apptItem.id), uid, 'in_consult');
+  }
+
+  return { id: ref.id };
+};
+
+export const updateVisit = (
+  clinicId: string,
+  visitId: string,
+  uid: string,
+  patch: Plain,
+) =>
+  updateDoc(doc(db, 'clinics', clinicId, 'visits', visitId), {
+    ...patch,
+    updatedBy: uid,
+    updatedAt: serverTimestamp(),
+  });
+
+export const closeVisit = async (clinicId: string, visitId: string, uid: string) => {
+  const visitRef = doc(db, 'clinics', clinicId, 'visits', visitId);
+  const snap = await getDoc(visitRef);
+  if (!snap.exists()) throw new Error('Visit not found');
+  const visit = { id: snap.id, ...snap.data() } as Plain;
+
+  await updateDoc(visitRef, {
+    status: 'closed',
+    updatedBy: uid,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (visit.sourceRefType === 'queue' && visit.sourceRefId) {
+    await updateQueueStatus(clinicId, String(visit.sourceRefId), uid, 'done');
+  }
+  if (visit.sourceRefType === 'appointment' && visit.sourceRefId) {
+    await updateAppointmentStatus(clinicId, String(visit.sourceRefId), uid, 'completed');
+  }
 };
