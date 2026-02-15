@@ -16,6 +16,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import type { StockItem } from '@/types/models';
 
 type Plain = Record<string, unknown>;
 
@@ -761,15 +762,34 @@ export const listenLowStockItems = (clinicId: string, cb: (rows: Plain[]) => voi
   onSnapshot(
     query(clinicRef(clinicId, 'stockItems'), where('active', '==', true), orderBy('name', 'asc')),
     async (itemsSnap) => {
+      type StockItemWithOnHand = StockItem & { onHand: number };
       const batchSnap = await getDocs(query(clinicRef(clinicId, 'stockBatches'), where('qtyAvailable', '>', 0)));
       const availableMap = new Map<string, number>();
       batchSnap.docs.forEach((batch) => {
         const itemId = String(batch.data().itemId || '');
         availableMap.set(itemId, (availableMap.get(itemId) || 0) + Number(batch.data().qtyAvailable || 0));
       });
-      const rows = itemsSnap.docs
-        .map((d) => ({ id: d.id, ...d.data(), onHand: availableMap.get(d.id) || 0 }))
-        .filter((row) => Number(row.onHand || 0) <= Number(row.reorderLevel || 0));
+      const items: StockItem[] = itemsSnap.docs.map((d) => {
+        const data = d.data() as Omit<StockItem, 'id'>;
+        return {
+          id: d.id,
+          name: String(data.name || ''),
+          sku: data.sku,
+          unit: data.unit || 'unit',
+          sellPrice: Number(data.sellPrice ?? 0),
+          reorderLevel: Number(data.reorderLevel ?? 0),
+          active: Boolean(data.active ?? true),
+          createdAt: data.createdAt,
+          createdBy: data.createdBy,
+          updatedAt: data.updatedAt,
+          updatedBy: data.updatedBy,
+        };
+      });
+      const withOnHand: StockItemWithOnHand[] = items.map((item) => ({
+        ...item,
+        onHand: availableMap.get(item.id) || 0,
+      }));
+      const rows: StockItemWithOnHand[] = withOnHand.filter((item) => item.onHand <= item.reorderLevel);
       cb(rows);
     },
   );
