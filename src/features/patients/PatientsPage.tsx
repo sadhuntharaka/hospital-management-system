@@ -1,21 +1,23 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { Link, useNavigate } from 'react-router-dom';
+import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
-import { createPatient, listByClinic } from '@/lib/clinicDb';
+import { createPatient, listByClinic, updatePatient } from '@/lib/clinicDb';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { DataTable } from '@/components/ui/DataTable';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Drawer } from '@/components/ui/Drawer';
 import { useToast } from '@/components/ui/Toast';
+import { Card, CardHeader } from '@/components/ui/Card';
+import { Toolbar } from '@/components/ui/Toolbar';
+import { TableSkeleton } from '@/components/ui/Skeleton';
 
 const schema = z.object({
   fullName: z.string().min(2),
@@ -24,9 +26,12 @@ const schema = z.object({
   patientCode: z.string().min(3),
 });
 
+type PatientForm = z.infer<typeof schema>;
+
 export const PatientsPage = () => {
   const { user } = useAuthContext();
   const { push } = useToast();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [showDrawer, setShowDrawer] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
@@ -36,7 +41,10 @@ export const PatientsPage = () => {
     queryKey: ['patients', DEFAULT_CLINIC_ID],
     queryFn: () => listByClinic(DEFAULT_CLINIC_ID, 'patients'),
   });
-  const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
+  const form = useForm<PatientForm>({ resolver: zodResolver(schema), defaultValues: { fullName: '', nic: '', phone: '', patientCode: '' } });
+
+  const watchedPhone = useWatch({ control: form.control, name: 'phone' });
+  const watchedNic = useWatch({ control: form.control, name: 'nic' });
 
   const filtered = useMemo(
     () =>
@@ -49,18 +57,30 @@ export const PatientsPage = () => {
   );
 
   const duplicate = useMemo(() => {
-    const phone = form.watch('phone') || '';
-    const nic = form.watch('nic') || '';
-    return (data as any[]).find((p: any) => p.phone === phone || p.nic === nic);
-  }, [data, form.watch('phone'), form.watch('nic')]);
+    if (selectedPatient) return null;
+    return (data as any[]).find((p: any) => (watchedPhone && p.phone === watchedPhone) || (watchedNic && p.nic === watchedNic));
+  }, [data, watchedPhone, watchedNic, selectedPatient]);
 
   const createMutation = useMutation({
-    mutationFn: (payload: z.infer<typeof schema>) =>
+    mutationFn: (payload: PatientForm) =>
       createPatient(DEFAULT_CLINIC_ID, user?.uid || 'admin', payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['patients'] });
       form.reset();
-      push('Patient created');
+      setShowDrawer(false);
+      push('Patient created', 'success');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (payload: PatientForm) =>
+      updatePatient(DEFAULT_CLINIC_ID, selectedPatient.id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['patients'] });
+      form.reset();
+      setSelectedPatient(null);
+      setShowDrawer(false);
+      push('Patient updated', 'success');
     },
   });
 
@@ -69,30 +89,23 @@ export const PatientsPage = () => {
       <PageHeader
         title="Patients"
         subtitle="Fast CRM search, duplicate checks, and quick patient actions"
-        actions={<Button onClick={() => setShowDrawer(true)}>+ New Patient</Button>}
+        actions={<Button onClick={() => { setSelectedPatient(null); form.reset(); setShowDrawer(true); }}>+ New Patient</Button>}
       />
 
-      <div className="rounded-lg bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Input
-            placeholder="Search by name, phone, NIC, code"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-md"
-          />
-        </div>
+      <Card>
+        <CardHeader title="Patient Registry" subtitle="Use filters and quick actions for reception workflow." />
+        <Toolbar
+          left={<Input placeholder="Search by name, phone, NIC, code" value={search} onChange={(e) => setSearch(e.target.value)} className="w-[360px]" />}
+          right={<p className="text-xs text-slate-500">{filtered.length} records</p>}
+        />
 
         {isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-10" />
-            <Skeleton className="h-10" />
-            <Skeleton className="h-10" />
-          </div>
+          <TableSkeleton rows={6} />
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No patients"
             description="Create a patient to start consultation and billing workflows."
-            action={<Button onClick={() => setShowDrawer(true)}>Create patient</Button>}
+            action={<Button onClick={() => { setSelectedPatient(null); setShowDrawer(true); }}>Create patient</Button>}
           />
         ) : (
           <DataTable
@@ -128,36 +141,41 @@ export const PatientsPage = () => {
               },
             ]}
             rowActions={[
+              { label: 'Open profile', onClick: (row: any) => navigate(`/patients/${row.id}`) },
+              { label: 'Create appointment', onClick: () => navigate('/appointments') },
+              { label: 'Create invoice', onClick: () => navigate('/billing') },
               {
                 label: 'Quick edit',
                 onClick: (row: any) => {
                   setSelectedPatient(row);
+                  form.reset({
+                    fullName: row.fullName || '',
+                    phone: row.phone || '',
+                    nic: row.nic || '',
+                    patientCode: row.patientCode || '',
+                  });
                   setShowDrawer(true);
-                },
-              },
-              {
-                label: 'Open profile',
-                onClick: (row: any) => {
-                  window.location.href = `/patients/${row.id}`;
                 },
               },
             ]}
           />
         )}
-      </div>
+      </Card>
 
       <Drawer open={showDrawer} onClose={() => setShowDrawer(false)} title={selectedPatient ? `Edit ${selectedPatient.fullName}` : 'New Patient'}>
         {duplicate && !selectedPatient && (
-          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-            Possible duplicate found: {duplicate.fullName} ({duplicate.phone} / {duplicate.nic})
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">Possible duplicate found</p>
+            <p>{duplicate.fullName} ({duplicate.phone} / {duplicate.nic})</p>
+            <Button variant="secondary" className="mt-2" onClick={() => navigate(`/patients/${duplicate.id}`)}>Open existing patient</Button>
           </div>
         )}
-        <form className="space-y-2" onSubmit={form.handleSubmit((v) => createMutation.mutate(v))}>
+        <form className="space-y-2" onSubmit={form.handleSubmit((v) => selectedPatient ? updateMutation.mutate(v) : createMutation.mutate(v))}>
           <Input placeholder="Patient code" {...form.register('patientCode')} />
           <Input placeholder="Full name" {...form.register('fullName')} />
           <Input placeholder="Phone" {...form.register('phone')} />
           <Input placeholder="NIC" {...form.register('nic')} />
-          <Button type="submit" disabled={!!duplicate && !selectedPatient}>Save patient</Button>
+          <Button type="submit" disabled={!!duplicate && !selectedPatient}>{selectedPatient ? 'Update patient' : 'Save patient'}</Button>
         </form>
       </Drawer>
     </div>

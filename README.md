@@ -59,7 +59,7 @@ Reusable UI components now include:
 - `Button`, `Input`, `Select`, `StatusPill`
 - `Modal`, `Drawer`, `ConfirmDialog`
 - `ToastProvider/useToast`
-- `Skeleton`, `EmptyState`, `PageHeader`, `DataTable`
+- `Skeleton`, `EmptyState`, `PageHeader`, `DataTable`, `Card`, `Toolbar`, `PatientIdentityBar`
 
 App shell improvements:
 - Responsive TopBar + SideNav
@@ -72,3 +72,10 @@ Page UX upgrades:
 - Appointments: live list with standardized status pills + searchable table
 - Queue/Billing/Dispense: standardized headers and faster action flows
 - Dispense now includes confirmation dialog before stock deduction
+
+
+Additional UX refinements:
+- Command palette supports keyboard navigation (Up/Down/Enter) and grouped results.
+- Appointments include status/date quick filters for daily time management.
+- Patient drawer supports create + edit modes with duplicate safety callout and direct open-existing CTA.
+- Dispense workflow includes required-field validation and pre-confirmation summary.

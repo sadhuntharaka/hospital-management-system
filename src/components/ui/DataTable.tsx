@@ -13,7 +13,7 @@ interface RowAction<T> {
   onClick: (row: T) => void;
 }
 
-export const DataTable = <T extends { id: string }>({ rows, columns, rowActions = [] }: { rows: T[]; columns: Column<T>[]; rowActions?: RowAction<T>[] }) => {
+export const DataTable = <T extends { id: string }>({ rows, columns, rowActions = [], emptyText = 'No records found' }: { rows: T[]; columns: Column<T>[]; rowActions?: RowAction<T>[]; emptyText?: string }) => {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [ascending, setAscending] = useState(true);
   const [page, setPage] = useState(1);
@@ -37,60 +37,71 @@ export const DataTable = <T extends { id: string }>({ rows, columns, rowActions 
 
   return (
     <div className="overflow-hidden rounded-lg border bg-white">
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-slate-50">
-          <tr>
-            {columns.map((column) => (
-              <th key={column.key} className="px-4 py-3 font-semibold text-slate-700">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1"
-                  onClick={() => {
-                    if (!column.sortValue) return;
-                    if (sortKey === column.key) setAscending((v) => !v);
-                    else {
-                      setSortKey(column.key);
-                      setAscending(true);
-                    }
-                  }}
-                >
-                  {column.header}
-                </button>
-              </th>
-            ))}
-            {rowActions.length > 0 && <th className="px-4 py-3" />}
-          </tr>
-        </thead>
-        <tbody>
-          {paginated.map((row) => (
-            <tr key={row.id} className="border-t">
+      <div className="max-h-[520px] overflow-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50">
+            <tr>
               {columns.map((column) => (
-                <td key={`${row.id}-${column.key}`} className="px-4 py-3">
-                  {column.render(row)}
-                </td>
+                <th key={column.key} className="px-4 py-3 font-semibold text-slate-700">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1"
+                    onClick={() => {
+                      if (!column.sortValue) return;
+                      if (sortKey === column.key) setAscending((v) => !v);
+                      else {
+                        setSortKey(column.key);
+                        setAscending(true);
+                      }
+                    }}
+                  >
+                    {column.header}
+                    {sortKey === column.key ? (ascending ? '↑' : '↓') : ''}
+                  </button>
+                </th>
               ))}
-              {rowActions.length > 0 && (
-                <td className="px-4 py-3 text-right">
-                  <details className="relative inline-block">
-                    <summary className="cursor-pointer list-none rounded px-2 py-1 hover:bg-slate-100">⋯</summary>
-                    <div className="absolute right-0 z-10 mt-1 min-w-36 rounded border bg-white p-1 shadow">
-                      {rowActions.map((action) => (
-                        <button
-                          key={action.label}
-                          className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-slate-100"
-                          onClick={() => action.onClick(row)}
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                  </details>
-                </td>
-              )}
+              {rowActions.length > 0 && <th className="px-4 py-3" />}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {paginated.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length + (rowActions.length ? 1 : 0)} className="px-4 py-10 text-center text-sm text-slate-500">
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              paginated.map((row) => (
+                <tr key={row.id} className="border-t hover:bg-slate-50">
+                  {columns.map((column) => (
+                    <td key={`${row.id}-${column.key}`} className="px-4 py-3">
+                      {column.render(row)}
+                    </td>
+                  ))}
+                  {rowActions.length > 0 && (
+                    <td className="px-4 py-3 text-right">
+                      <details className="relative inline-block">
+                        <summary className="cursor-pointer list-none rounded px-2 py-1 hover:bg-slate-100">⋯</summary>
+                        <div className="absolute right-0 z-10 mt-1 min-w-36 rounded border bg-white p-1 shadow">
+                          {rowActions.map((action) => (
+                            <button
+                              key={action.label}
+                              className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-slate-100"
+                              onClick={() => action.onClick(row)}
+                            >
+                              {action.label}
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    </td>
+                  )}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
       <div className="flex items-center justify-between border-t bg-slate-50 px-4 py-2 text-xs">
         <span>
           Page {page} of {pageCount}
