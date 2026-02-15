@@ -86,7 +86,7 @@ export const LoginPage = () => {
         })}
       >
         <h1 className="text-xl font-bold">Admin Login</h1>
-        <Input placeholder="Email" autoComplete="email" {...register('email')} name="email" />
+        <Input type="email" autoComplete="email" {...register('email')} />
         {(isSubmitted || touchedFields.email) && errors.email?.message && (
           <p className="text-xs text-red-500">{errors.email.message}</p>
         )}
@@ -96,7 +96,6 @@ export const LoginPage = () => {
           placeholder="Password"
           autoComplete="current-password"
           {...register('password')}
-          name="password"
         />
         {(isSubmitted || touchedFields.password) && errors.password?.message && (
           <p className="text-xs text-red-500">{errors.password.message}</p>
