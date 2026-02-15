@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply text-slate-900;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
