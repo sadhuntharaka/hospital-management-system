@@ -1,51 +1,22 @@
 # Hospital & Dispensary CRM (Sri Lanka) MVP
 
-Production-ready MVP scaffold using **React + Vite + TypeScript + Tailwind**, Firebase Auth/Firestore/Storage, and Netlify Functions for privileged operations.
+React + Vite + TypeScript + Tailwind frontend, Firebase Auth/Firestore/Storage backend, and Netlify Functions for privileged operations.
 
-## Implemented modules
-- Auth + protected routing with custom-claims awareness (`clinicId`, `role`)
-- Patient CRM list/create/profile
-- Appointments list with live `onSnapshot`
-- Walk-in queue token generation via Firestore transaction
-- Consultation/prescription capture + print
-- Billing invoice number generation via secure server function + print
-- Pharmacy FEFO dispense transaction with stock movement writes
-- Admin/reporting/stock routes scaffolded for expansion
-- Firebase Firestore/Storage rules enforcing role-based access
-- Netlify functions: `createAdmin`, `createUser`, `setClaims`, `generateInvoiceNumber`, `voidInvoice`
-- Seed CLI for first-run setup
+## Core architecture
+- Multi-tenant clinic data in `/clinics/{clinicId}/...`
+- Access control with Firebase custom claims: `clinicId`, `role`
+- Roles: `admin`, `doctor`, `receptionist`, `pharmacy`, `manager`
+- Password hardening: bootstrap users start with default password and are forced to change it on first login
 
-## Firebase project values
-Project ID: `hospital-management-syst-855b0`
+## Netlify Functions included
+- `createAdmin`: create first clinic + admin user
+- `createUser`: admin creates additional users
+- `setClaims`: admin recovery for existing Auth users (set claims + profile)
+- `bootstrapClinic`: one-time bootstrap clinic + 5 role users (secret-protected)
+- `generateInvoiceNumber`, `voidInvoice`
 
-Frontend config (already in `.env.example`):
-- `VITE_FIREBASE_API_KEY=AIzaSyDIdn-H7PhF5bDrokCLI2CZPNP64Uy65x0`
-- `VITE_FIREBASE_AUTH_DOMAIN=hospital-management-syst-855b0.firebaseapp.com`
-- `VITE_FIREBASE_PROJECT_ID=hospital-management-syst-855b0`
-- `VITE_FIREBASE_STORAGE_BUCKET=hospital-management-syst-855b0.firebasestorage.app`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID=396437714755`
-- `VITE_FIREBASE_APP_ID=1:396437714755:web:645cfba7554bf6414da1f6`
-- `VITE_FIREBASE_MEASUREMENT_ID=G-Z8PFW2V5QQ`
-
-## Firebase console checklist
-1. Enable Auth > Email/Password.
-2. Create Firestore database (production mode).
-3. Create Storage bucket.
-4. Deploy rules:
-   ```bash
-   firebase deploy --only firestore:rules,storage
-   ```
-5. Ensure users are assigned custom claims (`clinicId`, `role`) using function/seed script.
-
-## Local development
-```bash
-cp .env.example .env
-npm install
-npm run dev
-```
-
-## Netlify environment variables
-Set in Netlify Site settings:
+## Required environment variables
+### Frontend (Vite)
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
 - `VITE_FIREBASE_PROJECT_ID`
@@ -53,36 +24,63 @@ Set in Netlify Site settings:
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_MEASUREMENT_ID`
-- `FIREBASE_SERVICE_ACCOUNT_JSON` (**stringified JSON**, never commit file)
+
+### Functions (server-only)
+- `FIREBASE_SERVICE_ACCOUNT_JSON` (stringified service account JSON)
 - `FIREBASE_PROJECT_ID`
-- `FIREBASE_DATABASE_URL` (optional)
+- `BOOTSTRAP_SECRET` (long random secret)
+- `CLINIC_DEFAULT_PASSWORD=Clinic@2026#ChangeMe`
+
+## Local run
+```bash
+cp .env.example .env
+npm install
+npm run dev
+```
+
+## Deploy Firebase rules
+```bash
+firebase deploy --only firestore:rules,storage
+```
 
 ## Deploy to Netlify
-1. Push repository.
-2. Build command: `npm run build`
-3. Publish directory: `dist`
-4. Functions directory: `netlify/functions`
-5. Confirm SPA redirect via `public/_redirects` or `netlify.toml`.
+- Build command: `npm run build`
+- Publish directory: `dist`
+- Functions directory: `netlify/functions`
+- Node version pinned in `netlify.toml` (`NODE_VERSION = 18`)
 
-## Seed / first run
-### Option A: Netlify function (preferred)
-POST `/.netlify/functions/createAdmin` with:
+## Bootstrap clinic after deploy (recommended)
+```bash
+curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/bootstrapClinic' \
+  -H 'Content-Type: application/json' \
+  -H 'X-BOOTSTRAP-SECRET: <BOOTSTRAP_SECRET>' \
+  --data '{"clinicName":"City Care","emailDomain":"myclinic.lk"}'
+```
+
+### Bootstrap response schema
 ```json
 {
-  "clinicName": "City Care",
-  "adminEmail": "admin@citycare.lk",
-  "adminPassword": "StrongPass123!",
-  "adminName": "Main Admin"
+  "clinicId": "<clinicId>",
+  "accounts": [
+    { "role": "admin", "email": "admin@myclinic.lk", "uid": "..." },
+    { "role": "doctor", "email": "doctor@myclinic.lk", "uid": "..." },
+    { "role": "receptionist", "email": "reception@myclinic.lk", "uid": "..." },
+    { "role": "pharmacy", "email": "pharmacy@myclinic.lk", "uid": "..." },
+    { "role": "manager", "email": "manager@myclinic.lk", "uid": "..." }
+  ],
+  "note": "Default password set; must change on first login."
 }
 ```
 
-Response includes `{ uid, clinicId }`. Keep the `clinicId`; it is required for user recovery and role management.
+## First login behavior
+1. Sign in with generated role emails.
+2. Use default password: `Clinic@2026#ChangeMe`.
+3. App forces redirect to `/change-password`.
+4. After password change, role-based access is available.
 
-### First admin recovery (existing Auth user)
-If a Firebase Auth user exists but has no claims/profile doc, call `setClaims` as an authenticated admin from the same clinic.
+## Claims recovery for existing Auth users (admin only)
+Use this when a user was created manually in Firebase Auth and has no claims/profile.
 
-1. Sign in as an existing admin and get an ID token from the frontend app (or SDK).
-2. Run:
 ```bash
 curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/setClaims' \
   -H 'Content-Type: application/json' \
@@ -96,17 +94,7 @@ curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/setClaims' \
   }'
 ```
 
-This sets custom claims and creates/updates: `clinics/<clinicId>/users/<uid>`.
-
-### Option B: CLI
-```bash
-FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}' \
-FIREBASE_PROJECT_ID='hospital-management-syst-855b0' \
-npm run seed -- "City Care" "admin@citycare.lk" "StrongPass123!" "Main Admin"
-```
-
-## Important security notes
-- Firebase web config is public by design.
-- Security is enforced by Firestore/Storage rules and custom claims.
+## Security notes
 - Never commit service account JSON.
-- Privileged operations must run in Netlify Functions using Firebase Admin SDK.
+- Frontend Firebase config is public by design; enforce security in rules + claims.
+- Privileged operations must run in Netlify Functions only.

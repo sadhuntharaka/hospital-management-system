@@ -3,6 +3,7 @@ import { AuthProvider } from '@/features/auth/AuthProvider';
 import { ProtectedRoute } from '@/features/auth/ProtectedRoute';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { LoginPage } from '@/features/auth/LoginPage';
+import { ChangePasswordPage } from '@/features/auth/ChangePasswordPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { PatientsPage } from '@/features/patients/PatientsPage';
 import { PatientProfilePage } from '@/features/patients/PatientProfilePage';
@@ -11,9 +12,19 @@ import { QueuePage } from '@/features/appointments/QueuePage';
 import { ConsultationPage } from '@/features/consultation/ConsultationPage';
 import { BillingPage } from '@/features/billing/BillingPage';
 import { DispensePage } from '@/features/pharmacy/DispensePage';
-import { StockItemsPage, StockPurchasesPage, StockExpiryPage } from '@/features/stock/StockPages';
+import {
+  StockItemsPage,
+  StockPurchasesPage,
+  StockExpiryPage,
+} from '@/features/stock/StockPages';
 import { RevenueReportsPage } from '@/features/reports/RevenueReportsPage';
-import { AdminClinicPage, AdminUsersPage, AdminDoctorsPage, AdminServicesPage, AdminAuditPage } from '@/features/admin/AdminPages';
+import {
+  AdminClinicPage,
+  AdminUsersPage,
+  AdminDoctorsPage,
+  AdminServicesPage,
+  AdminAuditPage,
+} from '@/features/admin/AdminPages';
 
 const withProvider = (element: JSX.Element) => <AuthProvider>{element}</AuthProvider>;
 
@@ -23,6 +34,7 @@ export const router = createBrowserRouter([
     path: '/',
     element: withProvider(<ProtectedRoute />),
     children: [
+      { path: 'change-password', element: <ChangePasswordPage /> },
       {
         element: <AppLayout />,
         children: [

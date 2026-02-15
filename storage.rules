@@ -10,7 +10,8 @@ service firebase.storage {
     }
 
     match /clinicFiles/{clinic}/{allPaths=**} {
-      allow read, write: if signedIn()
+      allow read: if signedIn() && clinicId() == clinic;
+      allow write: if signedIn()
         && clinicId() == clinic
         && request.resource.size < 8 * 1024 * 1024
         && request.resource.contentType.matches('image/.*|application/pdf');

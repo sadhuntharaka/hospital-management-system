@@ -1,6 +1,12 @@
 const { getApp, admin, getAuthz } = require('./_admin');
 
-const ALLOWED_ROLES = new Set(['admin', 'doctor', 'receptionist', 'pharmacy', 'manager']);
+const ALLOWED_ROLES = new Set([
+  'admin',
+  'doctor',
+  'receptionist',
+  'pharmacy',
+  'manager',
+]);
 
 exports.handler = async (event) => {
   try {
@@ -29,11 +35,16 @@ exports.handler = async (event) => {
 
     const app = getApp();
     const authUser = await app.auth().getUser(uid);
-
     await app.auth().setCustomUserClaims(uid, { clinicId, role });
 
-    const profileRef = app.firestore().collection('clinics').doc(clinicId).collection('users').doc(uid);
+    const profileRef = app
+      .firestore()
+      .collection('clinics')
+      .doc(clinicId)
+      .collection('users')
+      .doc(uid);
 
+    const profileSnap = await profileRef.get();
     await profileRef.set(
       {
         uid,
@@ -44,7 +55,10 @@ exports.handler = async (event) => {
         active: true,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedBy: caller.uid,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: profileSnap.exists
+          ? profileSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp()
+          : admin.firestore.FieldValue.serverTimestamp(),
+        createdBy: profileSnap.exists ? profileSnap.data()?.createdBy || caller.uid : caller.uid,
       },
       { merge: true },
     );

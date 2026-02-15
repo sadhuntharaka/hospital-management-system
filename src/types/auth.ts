@@ -12,4 +12,5 @@ export interface UserProfile {
   role: Role;
   clinicId: string;
   active: boolean;
+  mustChangePassword?: boolean;
 }
