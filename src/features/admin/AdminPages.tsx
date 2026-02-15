@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { DataTable } from '@/components/ui/DataTable';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { AdminDoctorsPage } from './AdminDoctorsPage';
 
 const placeholderUsers = [{ id: '1', name: 'Admin User', role: 'admin', status: 'active' }];
 const placeholderServices = [{ id: '1', name: 'General Consultation', fee: '3000' }];
@@ -39,15 +40,7 @@ export const AdminUsersPage = () => (
   </div>
 );
 
-export const AdminDoctorsPage = () => (
-  <div className="space-y-4">
-    <PageHeader title="Doctor Profiles + Schedules" subtitle="Template-based weekly schedules" actions={<Button>Add doctor</Button>} />
-    <Card>
-      <CardHeader title="Schedule template" subtitle="Coming soon with slot-length editor." />
-      <p className="text-sm text-slate-600">Use this section to configure doctor availability and session slots.</p>
-    </Card>
-  </div>
-);
+export { AdminDoctorsPage };
 
 export const AdminServicesPage = () => (
   <div className="space-y-4">
