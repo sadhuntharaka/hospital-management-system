@@ -1,19 +1,13 @@
 # Hospital & Dispensary CRM (Sri Lanka) MVP
 
-React + Vite + TypeScript + Tailwind frontend, Firebase Auth/Firestore/Storage backend, and Netlify Functions for privileged operations.
+React + Vite + TypeScript + Tailwind frontend with Firebase Auth/Firestore/Storage and Netlify deploy support.
 
-## Core architecture
-- Multi-tenant clinic data in `/clinics/{clinicId}/...`
-- Access control with Firebase custom claims: `clinicId`, `role`
-- Roles: `admin`, `doctor`, `receptionist`, `pharmacy`, `manager`
-- Password hardening: bootstrap users start with default password and are forced to change it on first login
-
-## Netlify Functions included
-- `createAdmin`: create first clinic + admin user
-- `createUser`: admin creates additional users
-- `setClaims`: admin recovery for existing Auth users (set claims + profile)
-- `bootstrapClinic`: one-time bootstrap clinic + 5 role users (secret-protected)
-- `generateInvoiceNumber`, `voidInvoice`
+## Current auth mode (temporary)
+The frontend now runs in **admin-only mode** to simplify sign-in:
+- Email/Password login via Firebase Auth.
+- Only one email is allowed into the app: `VITE_ADMIN_EMAIL`.
+- Any other authenticated user is immediately signed out and shown **Not authorized**.
+- No frontend role/claims/clinic checks are required for login in this mode.
 
 ## Required environment variables
 ### Frontend (Vite)
@@ -24,12 +18,14 @@ React + Vite + TypeScript + Tailwind frontend, Firebase Auth/Firestore/Storage b
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_MEASUREMENT_ID`
+- `VITE_ADMIN_EMAIL` (the only email allowed to access UI)
+- `VITE_DEFAULT_CLINIC_ID` (optional; defaults to `default`)
 
 ### Functions (server-only)
-- `FIREBASE_SERVICE_ACCOUNT_JSON` (stringified service account JSON)
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `FIREBASE_PROJECT_ID`
-- `BOOTSTRAP_SECRET` (long random secret)
-- `CLINIC_DEFAULT_PASSWORD=Clinic@2026#ChangeMe`
+- `BOOTSTRAP_SECRET`
+- `CLINIC_DEFAULT_PASSWORD`
 
 ## Local run
 ```bash
@@ -38,63 +34,21 @@ npm install
 npm run dev
 ```
 
-## Deploy Firebase rules
+## Build
+```bash
+npm run build
+```
+
+## Firebase rules deploy
 ```bash
 firebase deploy --only firestore:rules,storage
 ```
 
-## Deploy to Netlify
+## Netlify notes
 - Build command: `npm run build`
 - Publish directory: `dist`
 - Functions directory: `netlify/functions`
-- Node version pinned in `netlify.toml` (`NODE_VERSION = 18`)
+- Set `VITE_ADMIN_EMAIL` in Netlify environment variables to your real admin email
 
-## Bootstrap clinic after deploy (recommended)
-```bash
-curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/bootstrapClinic' \
-  -H 'Content-Type: application/json' \
-  -H 'X-BOOTSTRAP-SECRET: <BOOTSTRAP_SECRET>' \
-  --data '{"clinicName":"City Care","emailDomain":"myclinic.lk"}'
-```
-
-### Bootstrap response schema
-```json
-{
-  "clinicId": "<clinicId>",
-  "accounts": [
-    { "role": "admin", "email": "admin@myclinic.lk", "uid": "..." },
-    { "role": "doctor", "email": "doctor@myclinic.lk", "uid": "..." },
-    { "role": "receptionist", "email": "reception@myclinic.lk", "uid": "..." },
-    { "role": "pharmacy", "email": "pharmacy@myclinic.lk", "uid": "..." },
-    { "role": "manager", "email": "manager@myclinic.lk", "uid": "..." }
-  ],
-  "note": "Default password set; must change on first login."
-}
-```
-
-## First login behavior
-1. Sign in with generated role emails.
-2. Use default password: `Clinic@2026#ChangeMe`.
-3. App forces redirect to `/change-password`.
-4. After password change, role-based access is available.
-
-## Claims recovery for existing Auth users (admin only)
-Use this when a user was created manually in Firebase Auth and has no claims/profile.
-
-```bash
-curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/setClaims' \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <ADMIN_ID_TOKEN>' \
-  --data '{
-    "uid": "OAFecvxfXYcivYCB5YLnCCuhQn02",
-    "clinicId": "<YOUR_CLINIC_ID>",
-    "role": "admin",
-    "email": "sadhuntharaka4@gmail.com",
-    "displayName": "Sadhun Tharaka"
-  }'
-```
-
-## Security notes
-- Never commit service account JSON.
-- Frontend Firebase config is public by design; enforce security in rules + claims.
-- Privileged operations must run in Netlify Functions only.
+## Existing utility functions
+Netlify functions (`createAdmin`, `createUser`, `setClaims`, `bootstrapClinic`, etc.) remain in the repo but are not required for frontend login flow in admin-only mode.

@@ -4,9 +4,10 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { dispenseFefo } from '@/lib/clinicDb';
+import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
 
 export const DispensePage = () => {
-  const { claims, user } = useAuthContext();
+  const { user } = useAuthContext();
   const [itemId, setItemId] = useState('');
   const [qty, setQty] = useState('1');
 
@@ -15,7 +16,18 @@ export const DispensePage = () => {
       <div className="space-y-2">
         <Input placeholder="Item ID" value={itemId} onChange={(e) => setItemId(e.target.value)} />
         <Input placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} />
-        <Button onClick={() => dispenseFefo({ clinicId: claims!.clinicId, itemId, quantity: Number(qty), uid: user!.uid })}>Dispense</Button>
+        <Button
+          onClick={() =>
+            dispenseFefo({
+              clinicId: DEFAULT_CLINIC_ID,
+              itemId,
+              quantity: Number(qty),
+              uid: user?.uid || 'admin',
+            })
+          }
+        >
+          Dispense
+        </Button>
       </div>
     </PageCard>
   );

@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { updatePassword } from 'firebase/auth';
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
-import { auth, db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
 import { useAuthContext } from './AuthProvider';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -27,7 +26,7 @@ const schema = z
   });
 
 export const ChangePasswordPage = () => {
-  const { user, claims, logout } = useAuthContext();
+  const { logout } = useAuthContext();
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
@@ -44,26 +43,19 @@ export const ChangePasswordPage = () => {
         onSubmit={handleSubmit(async ({ newPassword }) => {
           setError('');
           try {
-            if (!auth.currentUser || !user || !claims?.clinicId) {
+            if (!auth.currentUser) {
               throw new Error('Session missing. Please login again.');
             }
 
             await updatePassword(auth.currentUser, newPassword);
-            await updateDoc(doc(db, 'clinics', claims.clinicId, 'users', user.uid), {
-              mustChangePassword: false,
-              updatedAt: serverTimestamp(),
-              updatedBy: user.uid,
-            });
-
             navigate('/dashboard', { replace: true });
-            window.location.reload();
           } catch (err) {
             setError((err as Error).message || 'Failed to update password');
           }
         })}
       >
         <h1 className="text-xl font-semibold">Change Password</h1>
-        <p className="text-sm text-slate-600">You must change your password before continuing.</p>
+        <p className="text-sm text-slate-600">Optional utility page.</p>
         <Input type="password" placeholder="New password" {...register('newPassword')} />
         {errors.newPassword && <p className="text-xs text-red-600">{errors.newPassword.message}</p>}
         <Input type="password" placeholder="Confirm new password" {...register('confirmPassword')} />

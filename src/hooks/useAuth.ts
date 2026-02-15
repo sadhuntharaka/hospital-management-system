@@ -5,43 +5,34 @@ import {
   signOut,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-import type { AuthClaims, UserProfile } from '@/types/auth';
+import { auth } from '@/lib/firebase';
+import { ADMIN_EMAIL } from '@/lib/appConfig';
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
-  const [claims, setClaims] = useState<AuthClaims | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authMessage, setAuthMessage] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
-      setUser(nextUser);
-
       if (!nextUser) {
-        setClaims(null);
-        setProfile(null);
+        setUser(null);
         setLoading(false);
         return;
       }
 
-      const token = await nextUser.getIdTokenResult(true);
-      const nextClaims: AuthClaims = {
-        clinicId: String(token.claims.clinicId || ''),
-        role: token.claims.role as AuthClaims['role'],
-      };
-      setClaims(nextClaims);
+      const isAdmin =
+        !!nextUser.email && !!ADMIN_EMAIL && nextUser.email.toLowerCase() === ADMIN_EMAIL;
 
-      if (nextClaims.clinicId) {
-        const profileSnap = await getDoc(
-          doc(db, 'clinics', nextClaims.clinicId, 'users', nextUser.uid),
-        );
-        setProfile((profileSnap.data() as UserProfile) || null);
-      } else {
-        setProfile(null);
+      if (!isAdmin) {
+        setAuthMessage('Not authorized');
+        await signOut(auth);
+        setUser(null);
+        setLoading(false);
+        return;
       }
 
+      setUser(nextUser);
       setLoading(false);
     });
 
@@ -50,9 +41,10 @@ export const useAuth = () => {
 
   return {
     user,
-    claims,
-    profile,
     loading,
+    isAdmin: !!user?.email && !!ADMIN_EMAIL && user.email.toLowerCase() === ADMIN_EMAIL,
+    authMessage,
+    clearAuthMessage: () => setAuthMessage(''),
     login: (email: string, password: string) =>
       signInWithEmailAndPassword(auth, email, password),
     logout: () => signOut(auth),
