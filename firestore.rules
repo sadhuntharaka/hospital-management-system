@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function clinicClaim() {
+      return request.auth.token.clinicId;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function inClinic(clinicId) {
+      return signedIn() && clinicClaim() == clinicId;
+    }
+
+    function isAdmin() { return role() == 'admin'; }
+    function isDoctor() { return role() == 'doctor'; }
+    function isReceptionist() { return role() == 'receptionist'; }
+    function isPharmacy() { return role() == 'pharmacy'; }
+    function isManager() { return role() == 'manager'; }
+
+    function clinicReader(clinicId) {
+      return inClinic(clinicId);
+    }
+
+    function noDeleteUnlessAdmin(clinicId) {
+      return inClinic(clinicId) && isAdmin();
+    }
+
+    match /clinics/{clinicId} {
+      allow read: if clinicReader(clinicId);
+      allow create, update, delete: if noDeleteUnlessAdmin(clinicId);
+
+      match /users/{uid} {
+        allow read: if clinicReader(clinicId);
+        allow create, update, delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /patients/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isReceptionist());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /appointments/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isReceptionist());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /queue/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isReceptionist());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /visits/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isDoctor());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /prescriptions/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isDoctor());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /invoices/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isReceptionist());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /payments/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isReceptionist());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /items/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isPharmacy());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /purchases/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isPharmacy());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /stockBatches/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isPharmacy());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /stockMovements/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create: if inClinic(clinicId) && (isAdmin() || isPharmacy());
+        allow update, delete: if false;
+      }
+
+      match /dispense/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update: if inClinic(clinicId) && (isAdmin() || isPharmacy());
+        allow delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /services/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow create, update, delete: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if inClinic(clinicId) && (isAdmin() || isManager());
+        allow create: if noDeleteUnlessAdmin(clinicId);
+        allow update, delete: if false;
+      }
+
+      match /reports/{docId} {
+        allow read: if clinicReader(clinicId);
+        allow write: if noDeleteUnlessAdmin(clinicId);
+      }
+
+      match /{document=**} {
+        allow read: if clinicReader(clinicId);
+        allow write: if noDeleteUnlessAdmin(clinicId);
+      }
+    }
+  }
+}
