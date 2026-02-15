@@ -1,1 +1,54 @@
-# hospital-management-system
+# Hospital & Dispensary CRM (Sri Lanka) MVP
+
+React + Vite + TypeScript + Tailwind frontend with Firebase Auth/Firestore/Storage and Netlify deploy support.
+
+## Current auth mode (temporary)
+The frontend now runs in **admin-only mode** to simplify sign-in:
+- Email/Password login via Firebase Auth.
+- Only one email is allowed into the app: `VITE_ADMIN_EMAIL`.
+- Any other authenticated user is immediately signed out and shown **Not authorized**.
+- No frontend role/claims/clinic checks are required for login in this mode.
+
+## Required environment variables
+### Frontend (Vite)
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_MEASUREMENT_ID`
+- `VITE_ADMIN_EMAIL` (the only email allowed to access UI)
+- `VITE_DEFAULT_CLINIC_ID` (optional; defaults to `default`)
+
+### Functions (server-only)
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `FIREBASE_PROJECT_ID`
+- `BOOTSTRAP_SECRET`
+- `CLINIC_DEFAULT_PASSWORD`
+
+## Local run
+```bash
+cp .env.example .env
+npm install
+npm run dev
+```
+
+## Build
+```bash
+npm run build
+```
+
+## Firebase rules deploy
+```bash
+firebase deploy --only firestore:rules,storage
+```
+
+## Netlify notes
+- Build command: `npm run build`
+- Publish directory: `dist`
+- Functions directory: `netlify/functions`
+- Set `VITE_ADMIN_EMAIL` in Netlify environment variables to your real admin email
+
+## Existing utility functions
+Netlify functions (`createAdmin`, `createUser`, `setClaims`, `bootstrapClinic`, etc.) remain in the repo but are not required for frontend login flow in admin-only mode.
