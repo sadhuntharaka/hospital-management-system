@@ -1,0 +1,105 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function clinicId() {
+      return request.auth.token.clinicId;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function isClinicMember(clinic) {
+      return signedIn() && clinicId() == clinic;
+    }
+
+    function isAdmin() { return role() == 'admin'; }
+    function isDoctor() { return role() == 'doctor'; }
+    function isReceptionist() { return role() == 'receptionist'; }
+    function isPharmacy() { return role() == 'pharmacy'; }
+    function isManager() { return role() == 'manager'; }
+
+    function noDeleteUnlessAdmin() {
+      return request.method != 'delete' || isAdmin();
+    }
+
+    match /clinics/{clinic} {
+      allow read: if isClinicMember(clinic);
+      allow create, update: if isClinicMember(clinic) && isAdmin();
+      allow delete: if false;
+
+      match /users/{userId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update, delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /patients/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isAdmin() || isReceptionist() || isDoctor());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /appointments/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isAdmin() || isReceptionist() || isDoctor());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /visits/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isDoctor() || isAdmin());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /prescriptions/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isDoctor() || isAdmin());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /invoices/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isReceptionist() || isAdmin());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /items/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isPharmacy() || isAdmin());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /stockBatches/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update: if isClinicMember(clinic) && (isPharmacy() || isAdmin());
+        allow delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /stockMovements/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create: if isClinicMember(clinic) && (isPharmacy() || isAdmin());
+        allow update, delete: if false;
+      }
+
+      match /services/{docId} {
+        allow read: if isClinicMember(clinic);
+        allow create, update, delete: if isClinicMember(clinic) && isAdmin();
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if isClinicMember(clinic) && (isAdmin() || isManager());
+        allow create: if isClinicMember(clinic) && isAdmin();
+        allow update, delete: if false;
+      }
+
+      match /{any=**} {
+        allow read: if isClinicMember(clinic);
+        allow write: if isClinicMember(clinic) && isAdmin() && noDeleteUnlessAdmin();
+      }
+    }
+  }
+}
