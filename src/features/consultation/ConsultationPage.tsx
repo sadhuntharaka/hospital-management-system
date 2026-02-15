@@ -13,6 +13,7 @@ import { closeVisit, updateVisit } from '@/lib/clinicDb';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { useToast } from '@/components/ui/Toast';
 import { Combobox } from '@/components/ui/Combobox';
+import type { PrescriptionItem, Visit } from '@/types/models';
 
 interface FormShape {
   diagnosis: string;
@@ -21,10 +22,18 @@ interface FormShape {
   followUpDate: string;
 }
 
+const toVisit = (id: string, data: Record<string, unknown>): Visit => ({
+  id,
+  clinicId: DEFAULT_CLINIC_ID,
+  doctorId: (data.doctorId as string) || '',
+  status: ((data.status as Visit['status']) || 'open'),
+  ...(data as Omit<Visit, 'id' | 'clinicId' | 'doctorId' | 'status'>),
+});
+
 export const ConsultationPage = () => {
   const [params, setParams] = useSearchParams();
-  const [visit, setVisit] = useState<any | null>(null);
-  const [openVisits, setOpenVisits] = useState<any[]>([]);
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const [openVisits, setOpenVisits] = useState<Visit[]>([]);
   const { user } = useAuthContext();
   const { push } = useToast();
   const visitId = params.get('visitId');
@@ -40,7 +49,10 @@ export const ConsultationPage = () => {
         where('status', '==', 'open'),
         orderBy('createdAt', 'desc'),
       ),
-      (snap) => setOpenVisits(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snap) =>
+        setOpenVisits(
+          snap.docs.map((docItem) => toVisit(docItem.id, docItem.data() as Record<string, unknown>)),
+        ),
     );
 
     return unsubOpen;
@@ -54,16 +66,28 @@ export const ConsultationPage = () => {
     }
 
     const unsub = onSnapshot(doc(db, 'clinics', DEFAULT_CLINIC_ID, 'visits', visitId), (snap) => {
-      if (!snap.exists()) return;
-      const data = { id: snap.id, ...snap.data() };
-      setVisit(data);
+      if (!snap.exists()) {
+        const defaultVisit: Visit = {
+          id: visitId,
+          clinicId: DEFAULT_CLINIC_ID,
+          doctorId: '',
+          status: 'open',
+          prescription: [],
+        };
+        setVisit(defaultVisit);
+        reset({ diagnosis: '', notes: '', prescriptionText: '', followUpDate: '' });
+        return;
+      }
+
+      const nextVisit = toVisit(snap.id, snap.data() as Record<string, unknown>);
+      setVisit(nextVisit);
       reset({
-        diagnosis: data.diagnosis || '',
-        notes: data.notes || '',
-        prescriptionText: (data.prescription || [])
-          .map((p: any) => [p.name, p.dose, p.qty ? `x${p.qty}` : '', p.note].filter(Boolean).join(' '))
+        diagnosis: nextVisit.diagnosis ?? '',
+        notes: nextVisit.notes ?? '',
+        prescriptionText: (nextVisit.prescription ?? [])
+          .map((p) => [p.name, p.dose, p.qty ? `x${p.qty}` : '', p.note].filter(Boolean).join(' '))
           .join('\n'),
-        followUpDate: data.followUpDate || '',
+        followUpDate: nextVisit.followUpDate ?? '',
       });
     });
 
@@ -80,7 +104,7 @@ export const ConsultationPage = () => {
     [openVisits],
   );
 
-  const parsePrescription = (text: string) =>
+  const parsePrescription = (text: string): PrescriptionItem[] =>
     text
       .split('\n')
       .map((line) => line.trim())
@@ -115,7 +139,10 @@ export const ConsultationPage = () => {
             nic={visit.nic}
           />
           <Card>
-            <CardHeader title={`Consultation • ${visit.doctorName || '-'}`} subtitle={`Source: ${visit.sourceRefType || '-'}`} />
+            <CardHeader
+              title={`Consultation • ${visit.doctorName || '-'}`}
+              subtitle={`Source: ${visit.sourceRefType || '-'}`}
+            />
             <form
               className="space-y-2"
               onSubmit={handleSubmit(async (values) => {

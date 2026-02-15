@@ -15,3 +15,32 @@ export interface Patient extends BaseDoc {
   address?: string;
   gender?: string;
 }
+
+export type PrescriptionItem = {
+  name: string;
+  dose?: string;
+  qty?: number;
+  note?: string;
+};
+
+export type Visit = {
+  id: string;
+  clinicId: string;
+  patientId?: string;
+  patientName?: string;
+  phone?: string;
+  nic?: string;
+  doctorId: string;
+  doctorName?: string;
+  sourceRefType?: 'queue' | 'appointment';
+  sourceRefId?: string;
+  status: 'open' | 'closed';
+  diagnosis?: string;
+  notes?: string;
+  prescription?: PrescriptionItem[];
+  followUpDate?: string;
+  createdAt?: Timestamp | unknown;
+  createdBy?: string;
+  updatedAt?: Timestamp | unknown;
+  updatedBy?: string;
+};
