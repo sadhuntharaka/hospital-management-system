@@ -103,3 +103,15 @@ Additional UX refinements:
 8. Open **Revenue Reports** and select date range preset (Today/Week/Month/Custom).
 9. Validate totals: revenue, invoice count, average invoice, doctor/service breakdowns.
 10. Export CSV for invoice list, doctor totals, and service totals.
+
+## Inventory workflow (items + purchases + dispense + expiry)
+1. Open **Stock Items** and create a medicine with unit, sell price, reorder level, and active status.
+2. Confirm the item appears instantly in the realtime list and on-hand starts at `0`.
+3. Open **Stock Purchases**, create a purchase with supplier/date and at least one line (item, batch, expiry, unit cost, qty).
+4. Post purchase and confirm purchase number is generated and batch stock increases.
+5. Open item **View batches** and verify the posted batch exists with expected `qtyAvailable` and expiry.
+6. Open **Dispense**, choose item + quantity, review FEFO plan, and post dispense.
+7. Confirm today’s dispense list updates immediately and batch quantities decrease from earliest expiry first.
+8. Void a dispense and verify stock is restored to the same batches used in `batchesUsed`.
+9. Open **Expiry & Low Stock** and switch between 7/14/30/60 day filters to validate expiring-batch alerts.
+10. Void a purchase (with reason); verify reversal is blocked when stock is already consumed, and succeeds only when reversible.

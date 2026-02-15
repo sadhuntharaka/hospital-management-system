@@ -334,57 +334,445 @@ export const listenPaymentsByRange = (
     (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
   );
 
-export const dispenseFefo = async ({
-  clinicId,
-  itemId,
-  quantity,
-  uid,
-  email,
-}: {
-  clinicId: string;
-  itemId: string;
-  quantity: number;
-  uid: string;
-  email?: string | null;
-}) => {
-  await runTransaction(db, async (trx) => {
-    const batchesQ = query(
-      clinicRef(clinicId, 'stockBatches'),
-      where('itemId', '==', itemId),
-      where('quantityAvailable', '>', 0),
-      orderBy('expiryDate', 'asc'),
-    );
-    const batches = await getDocs(batchesQ);
-    let need = quantity;
+const isValidDateString = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
-    batches.docs.forEach((batchDoc) => {
-      if (need <= 0) return;
-      const remaining = Number(batchDoc.data().quantityAvailable || 0);
-      const take = Math.min(remaining, need);
-      if (take > 0) {
-        trx.update(batchDoc.ref, {
-          quantityAvailable: remaining - take,
+const nextDocNo = async (clinicId: string, key: 'purchases' | 'dispenses', prefix: 'PO' | 'DS') => {
+  const counterRef = doc(db, 'clinics', clinicId, 'counters', key);
+  return runTransaction(db, async (trx) => {
+    const counterSnap = await trx.get(counterRef);
+    const seq = (counterSnap.data()?.seq || 0) + 1;
+    trx.set(counterRef, { seq, updatedAt: serverTimestamp() }, { merge: true });
+    return `${prefix}-${String(seq).padStart(6, '0')}`;
+  });
+};
+
+export const listenStockItems = (clinicId: string, cb: (rows: Plain[]) => void, includeInactive = false) =>
+  onSnapshot(
+    query(
+      clinicRef(clinicId, 'stockItems'),
+      ...(includeInactive ? [] : [where('active', '==', true)]),
+      orderBy('name', 'asc'),
+    ),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const createStockItem = async (
+  clinicId: string,
+  uid: string,
+  payload: { name: string; sku?: string; unit: string; sellPrice: number; reorderLevel: number; active: boolean },
+) =>
+  addDoc(clinicRef(clinicId, 'stockItems'), {
+    ...payload,
+    sellPrice: Math.max(0, Number(payload.sellPrice || 0)),
+    reorderLevel: Math.max(0, Math.floor(Number(payload.reorderLevel || 0))),
+    createdBy: uid,
+    updatedBy: uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+export const updateStockItem = async (
+  clinicId: string,
+  uid: string,
+  itemId: string,
+  patch: Partial<{ name: string; sku: string; unit: string; sellPrice: number; reorderLevel: number; active: boolean }>,
+) =>
+  updateDoc(doc(db, 'clinics', clinicId, 'stockItems', itemId), {
+    ...patch,
+    updatedBy: uid,
+    updatedAt: serverTimestamp(),
+  });
+
+export const listenBatchesByItem = (clinicId: string, itemId: string, cb: (rows: Plain[]) => void) =>
+  onSnapshot(
+    query(clinicRef(clinicId, 'stockBatches'), where('itemId', '==', itemId), orderBy('expiryDate', 'asc')),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+
+export const computeOnHand = async (clinicId: string, itemId: string) => {
+  const snap = await getDocs(query(clinicRef(clinicId, 'stockBatches'), where('itemId', '==', itemId)));
+  return snap.docs.reduce((sum, d) => sum + Number(d.data().qtyAvailable || 0), 0);
+};
+
+export const createPurchase = async (
+  clinicId: string,
+  uid: string,
+  email: string | null | undefined,
+  payload: {
+    supplier?: string;
+    invoiceRef?: string;
+    purchaseDate: string;
+    items: Array<{ itemId: string; itemName: string; batchNo: string; expiryDate: string; unitCost: number; qty: number }>;
+  },
+) => {
+  if (!isValidDateString(payload.purchaseDate)) throw new Error('Invalid purchase date');
+  if (!payload.items.length) throw new Error('Add at least one purchase line');
+
+  const normalized = payload.items.map((line) => {
+    const qty = Math.max(1, Math.floor(Number(line.qty || 0)));
+    const unitCost = Math.max(0, Number(line.unitCost || 0));
+    if (!isValidDateString(line.expiryDate)) throw new Error(`Invalid expiry date for ${line.itemName}`);
+    return {
+      itemId: line.itemId,
+      itemName: line.itemName,
+      batchNo: line.batchNo.trim(),
+      expiryDate: line.expiryDate,
+      qty,
+      unitCost,
+      lineCost: qty * unitCost,
+    };
+  });
+
+  const purchaseNo = await nextDocNo(clinicId, 'purchases', 'PO');
+  const purchaseRef = doc(clinicRef(clinicId, 'purchases'));
+
+  await runTransaction(db, async (trx) => {
+    trx.set(purchaseRef, {
+      purchaseNo,
+      supplier: payload.supplier || null,
+      invoiceRef: payload.invoiceRef || null,
+      purchaseDate: payload.purchaseDate,
+      totalCost: normalized.reduce((sum, line) => sum + line.lineCost, 0),
+      status: 'posted',
+      items: normalized,
+      createdBy: uid,
+      updatedBy: uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    for (const line of normalized) {
+      const batchId = `${line.itemId}__${line.batchNo}__${line.expiryDate}`;
+      const batchRef = doc(db, 'clinics', clinicId, 'stockBatches', batchId);
+      const batchSnap = await trx.get(batchRef);
+      if (batchSnap.exists()) {
+        const data = batchSnap.data();
+        trx.update(batchRef, {
+          itemName: line.itemName,
+          supplier: payload.supplier || null,
+          purchaseId: purchaseRef.id,
+          unitCost: line.unitCost,
+          qtyReceived: Number(data.qtyReceived || 0) + line.qty,
+          qtyAvailable: Number(data.qtyAvailable || 0) + line.qty,
+          updatedBy: uid,
           updatedAt: serverTimestamp(),
         });
+      } else {
+        trx.set(batchRef, {
+          itemId: line.itemId,
+          itemName: line.itemName,
+          batchNo: line.batchNo,
+          expiryDate: line.expiryDate,
+          unitCost: line.unitCost,
+          qtyReceived: line.qty,
+          qtyAvailable: line.qty,
+          supplier: payload.supplier || null,
+          purchaseId: purchaseRef.id,
+          createdBy: uid,
+          updatedBy: uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      trx.set(doc(clinicRef(clinicId, 'stockMovements')), {
+        type: 'purchase',
+        refType: 'purchase',
+        refId: purchaseRef.id,
+        itemId: line.itemId,
+        itemName: line.itemName,
+        batchId,
+        quantity: line.qty,
+        unitCost: line.unitCost,
+        createdBy: uid,
+        createdAt: serverTimestamp(),
+      });
+    }
+  });
+
+  await addAuditLog(clinicId, uid, email, 'create_purchase', 'purchase', purchaseRef.id, `Created ${purchaseNo}`);
+  return { id: purchaseRef.id, purchaseNo };
+};
+
+export const voidPurchase = async (
+  clinicId: string,
+  uid: string,
+  email: string | null | undefined,
+  purchaseId: string,
+  reason: string,
+) => {
+  const purchaseRef = doc(db, 'clinics', clinicId, 'purchases', purchaseId);
+  await runTransaction(db, async (trx) => {
+    const purchaseSnap = await trx.get(purchaseRef);
+    if (!purchaseSnap.exists()) throw new Error('Purchase not found');
+    const purchase = purchaseSnap.data();
+    if (purchase.status === 'void') throw new Error('Purchase already void');
+
+    for (const line of purchase.items || []) {
+      const batchId = `${line.itemId}__${line.batchNo}__${line.expiryDate}`;
+      const batchRef = doc(db, 'clinics', clinicId, 'stockBatches', batchId);
+      const batchSnap = await trx.get(batchRef);
+      if (!batchSnap.exists()) throw new Error(`Batch missing for ${line.itemName}`);
+      const current = Number(batchSnap.data().qtyAvailable || 0);
+      if (current < Number(line.qty || 0)) {
+        throw new Error(`Cannot void purchase, insufficient reversible stock for ${line.itemName}`);
+      }
+    }
+
+    for (const line of purchase.items || []) {
+      const batchId = `${line.itemId}__${line.batchNo}__${line.expiryDate}`;
+      const batchRef = doc(db, 'clinics', clinicId, 'stockBatches', batchId);
+      const batchSnap = await trx.get(batchRef);
+      trx.update(batchRef, {
+        qtyAvailable: Number(batchSnap.data()?.qtyAvailable || 0) - Number(line.qty || 0),
+        updatedBy: uid,
+        updatedAt: serverTimestamp(),
+      });
+      trx.set(doc(clinicRef(clinicId, 'stockMovements')), {
+        type: 'void',
+        refType: 'purchase',
+        refId: purchaseId,
+        itemId: line.itemId,
+        itemName: line.itemName,
+        batchId,
+        quantity: -Math.abs(Number(line.qty || 0)),
+        unitCost: Number(line.unitCost || 0),
+        createdBy: uid,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    trx.update(purchaseRef, {
+      status: 'void',
+      voidReason: reason || 'Not provided',
+      voidedBy: uid,
+      voidedAt: serverTimestamp(),
+      updatedBy: uid,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  await addAuditLog(clinicId, uid, email, 'void_purchase', 'purchase', purchaseId, 'Voided purchase');
+};
+
+export const planFefo = async (clinicId: string, itemId: string, qty: number) => {
+  const requestedQty = Math.max(1, Math.floor(Number(qty || 0)));
+  const today = toDateKey();
+  const snap = await getDocs(
+    query(
+      clinicRef(clinicId, 'stockBatches'),
+      where('itemId', '==', itemId),
+      where('qtyAvailable', '>', 0),
+      orderBy('expiryDate', 'asc'),
+      orderBy('createdAt', 'asc'),
+    ),
+  );
+
+  const plan: Array<{ batchId: string; batchNo: string; expiryDate: string; qty: number; unitCost: number }> = [];
+  let need = requestedQty;
+  snap.docs.forEach((batchDoc) => {
+    if (need <= 0) return;
+    const batch = batchDoc.data();
+    if (String(batch.expiryDate || '') < today) return;
+    const available = Number(batch.qtyAvailable || 0);
+    const take = Math.min(available, need);
+    if (take > 0) {
+      plan.push({
+        batchId: batchDoc.id,
+        batchNo: String(batch.batchNo || '-'),
+        expiryDate: String(batch.expiryDate || ''),
+        qty: take,
+        unitCost: Number(batch.unitCost || 0),
+      });
+      need -= take;
+    }
+  });
+
+  if (need > 0) throw new Error('Insufficient non-expired stock for FEFO dispense');
+  return plan;
+};
+
+export const postDispense = async (
+  clinicId: string,
+  uid: string,
+  email: string | null | undefined,
+  payload: {
+    patientId?: string;
+    patientName?: string;
+    doctorId?: string;
+    doctorName?: string;
+    visitId?: string;
+    dispenseDate: string;
+    items: Array<{ itemId: string; itemName: string; qty: number }>;
+  },
+) => {
+  if (!isValidDateString(payload.dispenseDate)) throw new Error('Invalid dispense date');
+  if (!payload.items.length) throw new Error('Add at least one dispense item');
+
+  const normalizedItems = payload.items.map((item) => ({
+    itemId: item.itemId,
+    itemName: item.itemName,
+    qty: Math.max(1, Math.floor(Number(item.qty || 0))),
+  }));
+
+  const prePlans = new Map<string, Awaited<ReturnType<typeof planFefo>>>();
+  for (const item of normalizedItems) {
+    prePlans.set(item.itemId, await planFefo(clinicId, item.itemId, item.qty));
+  }
+
+  const dispenseNo = await nextDocNo(clinicId, 'dispenses', 'DS');
+  const dispenseRef = doc(clinicRef(clinicId, 'dispenses'));
+
+  await runTransaction(db, async (trx) => {
+    const lines: Plain[] = [];
+
+    for (const item of normalizedItems) {
+      const plan = prePlans.get(item.itemId) || [];
+      const used: Plain[] = [];
+      for (const usage of plan) {
+        const batchRef = doc(db, 'clinics', clinicId, 'stockBatches', usage.batchId);
+        const batchSnap = await trx.get(batchRef);
+        if (!batchSnap.exists()) throw new Error(`Batch ${usage.batchNo} not found`);
+        const current = Number(batchSnap.data().qtyAvailable || 0);
+        if (current < usage.qty) throw new Error(`Insufficient stock for ${item.itemName}`);
+
+        trx.update(batchRef, {
+          qtyAvailable: current - usage.qty,
+          updatedBy: uid,
+          updatedAt: serverTimestamp(),
+        });
+
         trx.set(doc(clinicRef(clinicId, 'stockMovements')), {
           type: 'dispense',
-          itemId,
-          batchId: batchDoc.id,
-          quantity: take,
           refType: 'dispense',
-          refId: null,
+          refId: dispenseRef.id,
+          itemId: item.itemId,
+          itemName: item.itemName,
+          batchId: usage.batchId,
+          quantity: -usage.qty,
+          unitCost: usage.unitCost,
           createdBy: uid,
           createdAt: serverTimestamp(),
         });
-        need -= take;
-      }
-    });
 
-    if (need > 0) throw new Error('Insufficient stock to dispense');
+        used.push(usage);
+      }
+
+      lines.push({
+        itemId: item.itemId,
+        itemName: item.itemName,
+        qty: item.qty,
+        batchesUsed: used,
+        costTotal: used.reduce((sum, row) => sum + Number(row.qty) * Number(row.unitCost), 0),
+      });
+    }
+
+    trx.set(dispenseRef, {
+      dispenseNo,
+      patientId: payload.patientId || null,
+      patientName: payload.patientName || null,
+      doctorId: payload.doctorId || null,
+      doctorName: payload.doctorName || null,
+      visitId: payload.visitId || null,
+      dispenseDate: payload.dispenseDate,
+      status: 'posted',
+      items: lines,
+      totalCost: lines.reduce((sum, line) => sum + Number(line.costTotal || 0), 0),
+      createdBy: uid,
+      updatedBy: uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 
-  await addAuditLog(clinicId, uid, email, 'dispense', 'stockMovement', itemId, `Dispensed qty ${quantity}`);
+  await addAuditLog(clinicId, uid, email, 'post_dispense', 'dispense', dispenseRef.id, `Posted ${dispenseNo}`);
+  return { id: dispenseRef.id, dispenseNo };
 };
+
+export const voidDispense = async (
+  clinicId: string,
+  uid: string,
+  email: string | null | undefined,
+  dispenseId: string,
+  reason: string,
+) => {
+  const dispenseRef = doc(db, 'clinics', clinicId, 'dispenses', dispenseId);
+  await runTransaction(db, async (trx) => {
+    const dispenseSnap = await trx.get(dispenseRef);
+    if (!dispenseSnap.exists()) throw new Error('Dispense not found');
+    const dispense = dispenseSnap.data();
+    if (dispense.status === 'void') throw new Error('Dispense already void');
+
+    for (const line of dispense.items || []) {
+      for (const batchUsed of line.batchesUsed || []) {
+        const batchRef = doc(db, 'clinics', clinicId, 'stockBatches', String(batchUsed.batchId));
+        const batchSnap = await trx.get(batchRef);
+        if (!batchSnap.exists()) throw new Error('Referenced batch not found for void');
+        trx.update(batchRef, {
+          qtyAvailable: Number(batchSnap.data().qtyAvailable || 0) + Number(batchUsed.qty || 0),
+          updatedBy: uid,
+          updatedAt: serverTimestamp(),
+        });
+        trx.set(doc(clinicRef(clinicId, 'stockMovements')), {
+          type: 'void',
+          refType: 'dispense',
+          refId: dispenseId,
+          itemId: line.itemId,
+          itemName: line.itemName,
+          batchId: batchUsed.batchId,
+          quantity: Math.abs(Number(batchUsed.qty || 0)),
+          unitCost: Number(batchUsed.unitCost || 0),
+          createdBy: uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+    }
+
+    trx.update(dispenseRef, {
+      status: 'void',
+      voidReason: reason || 'Not provided',
+      voidedBy: uid,
+      voidedAt: serverTimestamp(),
+      updatedBy: uid,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  await addAuditLog(clinicId, uid, email, 'void_dispense', 'dispense', dispenseId, 'Voided dispense');
+};
+
+export const listenExpiringBatches = (clinicId: string, days: number, cb: (rows: Plain[]) => void) => {
+  const today = new Date();
+  const upper = new Date();
+  upper.setDate(today.getDate() + Math.max(1, days));
+  const upperKey = toDateKey(upper);
+  return onSnapshot(
+    query(
+      clinicRef(clinicId, 'stockBatches'),
+      where('qtyAvailable', '>', 0),
+      where('expiryDate', '<=', upperKey),
+      orderBy('expiryDate', 'asc'),
+    ),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+  );
+};
+
+export const listenLowStockItems = (clinicId: string, cb: (rows: Plain[]) => void) =>
+  onSnapshot(
+    query(clinicRef(clinicId, 'stockItems'), where('active', '==', true), orderBy('name', 'asc')),
+    async (itemsSnap) => {
+      const batchSnap = await getDocs(query(clinicRef(clinicId, 'stockBatches'), where('qtyAvailable', '>', 0)));
+      const availableMap = new Map<string, number>();
+      batchSnap.docs.forEach((batch) => {
+        const itemId = String(batch.data().itemId || '');
+        availableMap.set(itemId, (availableMap.get(itemId) || 0) + Number(batch.data().qtyAvailable || 0));
+      });
+      const rows = itemsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data(), onHand: availableMap.get(d.id) || 0 }))
+        .filter((row) => Number(row.onHand || 0) <= Number(row.reorderLevel || 0));
+      cb(rows);
+    },
+  );
 
 export const seedDefaultServices = async (clinicId: string) => {
   const services = [
@@ -403,48 +791,52 @@ export const seedDefaultServices = async (clinicId: string) => {
   await batch.commit();
 };
 
-export const upsertStockItem = async (
-  clinicId: string,
-  uid: string,
-  payload: { name: string; sku: string; unit: string; reorderLevel: number; active: boolean },
-) =>
-  addDoc(clinicRef(clinicId, 'stockItems'), {
-    ...payload,
-    createdBy: uid,
-    createdAt: serverTimestamp(),
-  });
+// Backward-compatible wrappers
+export const upsertStockItem = createStockItem;
 
 export const createStockBatch = async (
   clinicId: string,
   uid: string,
   payload: {
     itemId: string;
+    itemName?: string;
     batchNo: string;
     expiryDate: string;
     quantityAvailable: number;
     unitCost: number;
   },
-) => {
-  const ref = await addDoc(clinicRef(clinicId, 'stockBatches'), {
-    ...payload,
-    createdBy: uid,
-    createdAt: serverTimestamp(),
+) =>
+  createPurchase(clinicId, uid, undefined, {
+    purchaseDate: toDateKey(),
+    items: [
+      {
+        itemId: payload.itemId,
+        itemName: payload.itemName || payload.itemId,
+        batchNo: payload.batchNo,
+        expiryDate: payload.expiryDate,
+        unitCost: payload.unitCost,
+        qty: payload.quantityAvailable,
+      },
+    ],
   });
-  await addDoc(clinicRef(clinicId, 'stockMovements'), {
-    type: 'purchase',
-    itemId: payload.itemId,
-    batchId: ref.id,
-    quantity: payload.quantityAvailable,
-    refType: 'purchase',
-    refId: ref.id,
-    createdBy: uid,
-    createdAt: serverTimestamp(),
+
+export const dispenseFefo = async ({
+  clinicId,
+  itemId,
+  quantity,
+  uid,
+  email,
+}: {
+  clinicId: string;
+  itemId: string;
+  quantity: number;
+  uid: string;
+  email?: string | null;
+}) =>
+  postDispense(clinicId, uid, email, {
+    dispenseDate: toDateKey(),
+    items: [{ itemId, itemName: itemId, qty: quantity }],
   });
-  await updateDoc(doc(db, 'clinics', clinicId, 'stockItems', payload.itemId), {
-    updatedAt: serverTimestamp(),
-    quantityOnHand: increment(payload.quantityAvailable),
-  });
-};
 
 
 export const listenPatients = (clinicId: string, cb: (rows: Plain[]) => void) =>
