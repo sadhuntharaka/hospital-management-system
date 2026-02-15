@@ -52,3 +52,23 @@ firebase deploy --only firestore:rules,storage
 
 ## Existing utility functions
 Netlify functions (`createAdmin`, `createUser`, `setClaims`, `bootstrapClinic`, etc.) remain in the repo but are not required for frontend login flow in admin-only mode.
+
+
+## UI/UX design system upgrade
+Reusable UI components now include:
+- `Button`, `Input`, `Select`, `StatusPill`
+- `Modal`, `Drawer`, `ConfirmDialog`
+- `ToastProvider/useToast`
+- `Skeleton`, `EmptyState`, `PageHeader`, `DataTable`
+
+App shell improvements:
+- Responsive TopBar + SideNav
+- Global search (`/` to focus)
+- Command palette (`Ctrl/Cmd + K`)
+- Quick `+ New` menu for core receptionist actions
+
+Page UX upgrades:
+- Patients: debounced search, duplicate detection warning, quick-edit drawer, row action menu
+- Appointments: live list with standardized status pills + searchable table
+- Queue/Billing/Dispense: standardized headers and faster action flows
+- Dispense now includes confirmation dialog before stock deduction

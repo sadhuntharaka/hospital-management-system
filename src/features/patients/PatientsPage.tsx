@@ -4,12 +4,18 @@ import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { PageCard } from '@/components/ui/PageCard';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { createPatient, listByClinic } from '@/lib/clinicDb';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { DataTable } from '@/components/ui/DataTable';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Drawer } from '@/components/ui/Drawer';
+import { useToast } from '@/components/ui/Toast';
 
 const schema = z.object({
   fullName: z.string().min(2),
@@ -20,9 +26,13 @@ const schema = z.object({
 
 export const PatientsPage = () => {
   const { user } = useAuthContext();
+  const { push } = useToast();
   const [search, setSearch] = useState('');
+  const [showDrawer, setShowDrawer] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
+  const debouncedSearch = useDebouncedValue(search, 250);
   const qc = useQueryClient();
-  const { data = [] } = useQuery({
+  const { data = [], isLoading } = useQuery({
     queryKey: ['patients', DEFAULT_CLINIC_ID],
     queryFn: () => listByClinic(DEFAULT_CLINIC_ID, 'patients'),
   });
@@ -30,13 +40,19 @@ export const PatientsPage = () => {
 
   const filtered = useMemo(
     () =>
-      data.filter((p: any) =>
-        `${p.fullName} ${p.phone} ${p.nic} ${p.patientCode}`
+      (data as any[]).filter((p: any) =>
+        `${p.fullName || ''} ${p.phone || ''} ${p.nic || ''} ${p.patientCode || ''}`
           .toLowerCase()
-          .includes(search.toLowerCase()),
+          .includes(debouncedSearch.toLowerCase()),
       ),
-    [data, search],
+    [data, debouncedSearch],
   );
+
+  const duplicate = useMemo(() => {
+    const phone = form.watch('phone') || '';
+    const nic = form.watch('nic') || '';
+    return (data as any[]).find((p: any) => p.phone === phone || p.nic === nic);
+  }, [data, form.watch('phone'), form.watch('nic')]);
 
   const createMutation = useMutation({
     mutationFn: (payload: z.infer<typeof schema>) =>
@@ -44,34 +60,106 @@ export const PatientsPage = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['patients'] });
       form.reset();
+      push('Patient created');
     },
   });
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <PageCard title="Patients">
-        <Input
-          placeholder="Search name / phone / NIC / code"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <div className="mt-3 space-y-2">
-          {filtered.map((p: any) => (
-            <Link className="block rounded border p-2" key={p.id} to={`/patients/${p.id}`}>
-              {p.patientCode} - {p.fullName}
-            </Link>
-          ))}
+    <div className="space-y-4">
+      <PageHeader
+        title="Patients"
+        subtitle="Fast CRM search, duplicate checks, and quick patient actions"
+        actions={<Button onClick={() => setShowDrawer(true)}>+ New Patient</Button>}
+      />
+
+      <div className="rounded-lg bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="Search by name, phone, NIC, code"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-md"
+          />
         </div>
-      </PageCard>
-      <PageCard title="Create patient">
+
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title="No patients"
+            description="Create a patient to start consultation and billing workflows."
+            action={<Button onClick={() => setShowDrawer(true)}>Create patient</Button>}
+          />
+        ) : (
+          <DataTable
+            rows={filtered as any[]}
+            columns={[
+              {
+                key: 'patientCode',
+                header: 'Code',
+                render: (row: any) => row.patientCode || '-',
+                sortValue: (row: any) => row.patientCode || '',
+              },
+              {
+                key: 'fullName',
+                header: 'Name',
+                render: (row: any) => (
+                  <Link className="text-brand hover:underline" to={`/patients/${row.id}`}>
+                    {row.fullName}
+                  </Link>
+                ),
+                sortValue: (row: any) => row.fullName || '',
+              },
+              {
+                key: 'phone',
+                header: 'Phone',
+                render: (row: any) => row.phone || '-',
+                sortValue: (row: any) => row.phone || '',
+              },
+              {
+                key: 'nic',
+                header: 'NIC',
+                render: (row: any) => row.nic || '-',
+                sortValue: (row: any) => row.nic || '',
+              },
+            ]}
+            rowActions={[
+              {
+                label: 'Quick edit',
+                onClick: (row: any) => {
+                  setSelectedPatient(row);
+                  setShowDrawer(true);
+                },
+              },
+              {
+                label: 'Open profile',
+                onClick: (row: any) => {
+                  window.location.href = `/patients/${row.id}`;
+                },
+              },
+            ]}
+          />
+        )}
+      </div>
+
+      <Drawer open={showDrawer} onClose={() => setShowDrawer(false)} title={selectedPatient ? `Edit ${selectedPatient.fullName}` : 'New Patient'}>
+        {duplicate && !selectedPatient && (
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+            Possible duplicate found: {duplicate.fullName} ({duplicate.phone} / {duplicate.nic})
+          </div>
+        )}
         <form className="space-y-2" onSubmit={form.handleSubmit((v) => createMutation.mutate(v))}>
           <Input placeholder="Patient code" {...form.register('patientCode')} />
           <Input placeholder="Full name" {...form.register('fullName')} />
           <Input placeholder="Phone" {...form.register('phone')} />
           <Input placeholder="NIC" {...form.register('nic')} />
-          <Button type="submit">Save patient</Button>
+          <Button type="submit" disabled={!!duplicate && !selectedPatient}>Save patient</Button>
         </form>
-      </PageCard>
+      </Drawer>
     </div>
   );
 };
