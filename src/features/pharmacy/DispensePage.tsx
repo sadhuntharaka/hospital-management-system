@@ -95,6 +95,10 @@ export const DispensePage = () => {
                 push('Quantity must be integer >= 1', 'error');
                 return;
               }
+              if (onHand < qtyNumber) {
+                push(`Insufficient stock: on-hand ${onHand}`, 'error');
+                return;
+              }
               try {
                 const planRows = await planFefo(DEFAULT_CLINIC_ID, selectedItem.id, qtyNumber);
                 setPlan(planRows);

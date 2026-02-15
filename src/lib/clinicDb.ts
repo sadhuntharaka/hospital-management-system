@@ -557,6 +557,14 @@ export const voidPurchase = async (
 };
 
 export const planFefo = async (clinicId: string, itemId: string, qty: number) => {
+  type FefoBatch = {
+    id: string;
+    batchNo: string;
+    expiryDate?: string;
+    qtyAvailable: number;
+    unitCost: number;
+    createdAt?: unknown;
+  };
   const requestedQty = Math.max(1, Math.floor(Number(qty || 0)));
   const today = toDateKey();
   const snap = await getDocs(
@@ -569,21 +577,36 @@ export const planFefo = async (clinicId: string, itemId: string, qty: number) =>
     ),
   );
 
+  const batches: FefoBatch[] = snap.docs.map((docSnap) => {
+    const data = docSnap.data();
+    return {
+      id: docSnap.id,
+      batchNo: String(data.batchNo || '-'),
+      expiryDate: data.expiryDate ? String(data.expiryDate) : undefined,
+      qtyAvailable: Number(data.qtyAvailable || 0),
+      unitCost: Number(data.unitCost || 0),
+      createdAt: data.createdAt,
+    };
+  });
+
+  const nonExpired = batches.filter((batch) => !batch.expiryDate || batch.expiryDate >= today);
+  if (nonExpired.length === 0) {
+    throw new Error('No valid non-expired stock');
+  }
+
   const plan: Array<{ batchId: string; batchNo: string; expiryDate: string; qty: number; unitCost: number }> = [];
   let need = requestedQty;
-  snap.docs.forEach((batchDoc) => {
+  nonExpired.forEach((batch) => {
     if (need <= 0) return;
-    const batch = batchDoc.data();
-    if (String(batch.expiryDate || '') < today) return;
     const available = Number(batch.qtyAvailable || 0);
     const take = Math.min(available, need);
     if (take > 0) {
       plan.push({
-        batchId: batchDoc.id,
-        batchNo: String(batch.batchNo || '-'),
+        batchId: batch.id,
+        batchNo: batch.batchNo,
         expiryDate: String(batch.expiryDate || ''),
         qty: take,
-        unitCost: Number(batch.unitCost || 0),
+        unitCost: batch.unitCost,
       });
       need -= take;
     }

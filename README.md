@@ -115,3 +115,18 @@ Additional UX refinements:
 8. Void a dispense and verify stock is restored to the same batches used in `batchesUsed`.
 9. Open **Expiry & Low Stock** and switch between 7/14/30/60 day filters to validate expiring-batch alerts.
 10. Void a purchase (with reason); verify reversal is blocked when stock is already consumed, and succeeds only when reversible.
+
+### Firestore index required for FEFO planning
+The FEFO planner queries `clinics/<clinicId>/stockBatches` with:
+- `where('itemId', '==', <itemId>)`
+- `where('qtyAvailable', '>', 0)`
+- `orderBy('expiryDate', 'asc')`
+- `orderBy('createdAt', 'asc')`
+
+Create a composite index with fields:
+1. `itemId` ASC
+2. `qtyAvailable` ASC
+3. `expiryDate` ASC
+4. `createdAt` ASC
+
+Firebase index docs: https://firebase.google.com/docs/firestore/query-data/indexing
