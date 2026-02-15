@@ -4,27 +4,27 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { dispenseFefo, subscribeByClinic } from '@/lib/clinicDb';
+import { Combobox } from '@/components/ui/Combobox';
+import { useStockItems } from '@/hooks/useLookupData';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { PatientIdentityBar } from '@/components/ui/PatientIdentityBar';
-import { Select } from '@/components/ui/Select';
 
 export const DispensePage = () => {
   const { user } = useAuthContext();
   const { push } = useToast();
-  const [items, setItems] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
-  const [itemId, setItemId] = useState('');
+  const [selectedItem, setSelectedItem] = useState<{ id: string; label: string } | null>(null);
   const [qty, setQty] = useState('1');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState('');
 
+  const { data: items, loading: itemsLoading } = useStockItems(DEFAULT_CLINIC_ID);
+
   useEffect(() => {
-    const unsubItems = subscribeByClinic(DEFAULT_CLINIC_ID, 'stockItems', (rows) => setItems(rows as any[]));
     const unsubBatches = subscribeByClinic(DEFAULT_CLINIC_ID, 'stockBatches', (rows) => setBatches(rows as any[]));
     return () => {
-      unsubItems();
       unsubBatches();
     };
   }, []);
@@ -34,14 +34,14 @@ export const DispensePage = () => {
   const available = useMemo(
     () =>
       batches
-        .filter((b) => b.itemId === itemId)
+        .filter((b) => b.itemId === selectedItem?.id)
         .reduce((sum, b) => sum + Number(b.quantityAvailable || 0), 0),
-    [batches, itemId],
+    [batches, selectedItem],
   );
 
   const summary = useMemo(
-    () => ({ itemId: itemId || '-', qty: qtyNumber || 0, clinicId: DEFAULT_CLINIC_ID }),
-    [itemId, qtyNumber],
+    () => ({ itemId: selectedItem?.id || '-', qty: qtyNumber || 0, clinicId: DEFAULT_CLINIC_ID }),
+    [selectedItem, qtyNumber],
   );
 
   return (
@@ -50,12 +50,14 @@ export const DispensePage = () => {
       <PageHeader title="Pharmacy Dispense" subtitle="FEFO stock deduction with safety confirmation" />
       <div className="rounded-lg bg-white p-4 shadow-sm">
         <div className="max-w-xl space-y-2">
-          <Select value={itemId} onChange={(e) => setItemId(e.target.value)}>
-            <option value="">Select stock item</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-          </Select>
+          <Combobox
+            label="Stock Item"
+            value={selectedItem}
+            onChange={setSelectedItem}
+            items={items.map((item) => ({ id: item.id as string, label: (item.name as string) || item.id as string, meta: item.sku as string | undefined }))}
+            loading={itemsLoading}
+            placeholder="Select stock item"
+          />
           <Input placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} type="number" min="1" />
 
           <div className="rounded-md bg-slate-50 p-3 text-sm text-slate-700">
@@ -71,7 +73,7 @@ export const DispensePage = () => {
             variant="danger"
             onClick={() => {
               setError('');
-              if (!itemId.trim()) {
+              if (!selectedItem?.id) {
                 setError('Item ID is required');
                 return;
               }
@@ -96,10 +98,11 @@ export const DispensePage = () => {
         message="You are about to deduct stock and create a stock movement record. Verify the correct patient and item before continuing."
         confirmLabel="Yes, dispense"
         onConfirm={async () => {
+          if (!selectedItem) return;
           try {
             await dispenseFefo({
               clinicId: DEFAULT_CLINIC_ID,
-              itemId,
+              itemId: selectedItem.id,
               quantity: qtyNumber,
               uid: user?.uid || 'admin',
               email: user?.email,

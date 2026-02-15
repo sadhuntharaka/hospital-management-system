@@ -7,41 +7,43 @@ import { useToast } from '@/components/ui/Toast';
 import { PatientIdentityBar } from '@/components/ui/PatientIdentityBar';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
-import { Select } from '@/components/ui/Select';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { DataTable } from '@/components/ui/DataTable';
+import { Combobox } from '@/components/ui/Combobox';
+import { useDoctors, usePatients, useServices } from '@/hooks/useLookupData';
 
 export const BillingPage = () => {
   const [invoiceNo, setInvoiceNo] = useState('');
-  const [patientName, setPatientName] = useState('');
-  const [doctorId, setDoctorId] = useState('');
-  const [serviceId, setServiceId] = useState('');
+  const [selectedPatient, setSelectedPatient] = useState<{ id: string; label: string } | null>(null);
+  const [selectedDoctor, setSelectedDoctor] = useState<{ id: string; label: string } | null>(null);
+  const [selectedService, setSelectedService] = useState<{ id: string; label: string } | null>(null);
   const [qty, setQty] = useState('1');
   const [discount, setDiscount] = useState('0');
-  const [doctors, setDoctors] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const { push } = useToast();
   const { user } = useAuthContext();
 
+  const { data: doctors, loading: doctorsLoading } = useDoctors(DEFAULT_CLINIC_ID);
+  const { data: patients, loading: patientsLoading } = usePatients(DEFAULT_CLINIC_ID);
+  const { data: services, loading: servicesLoading } = useServices(DEFAULT_CLINIC_ID);
+
   useEffect(() => {
-    const unsubDoctors = subscribeByClinic(DEFAULT_CLINIC_ID, 'doctors', (rows) => setDoctors(rows as any[]));
-    const unsubServices = subscribeByClinic(DEFAULT_CLINIC_ID, 'services', (rows) => setServices(rows as any[]));
     const unsubInvoices = subscribeByClinic(DEFAULT_CLINIC_ID, 'invoices', (rows) => setInvoices(rows as any[]));
     return () => {
-      unsubDoctors();
-      unsubServices();
       unsubInvoices();
     };
   }, []);
 
-  const selectedDoctor = doctors.find((item) => item.id === doctorId);
-  const selectedService = services.find((item) => item.id === serviceId);
+  const serviceDoc = services.find((item) => item.id === selectedService?.id);
 
   const lineTotal = useMemo(
-    () => Number(qty || 0) * Number(selectedService?.amount || 0),
-    [qty, selectedService],
+    () => Number(qty || 0) * Number(serviceDoc?.amount || 0),
+    [qty, serviceDoc],
   );
+
+  const doctorItems = useMemo(() => doctors.map((d) => ({ id: d.id as string, label: (d.fullName as string) || d.id as string, meta: (d.specialty as string) || undefined })), [doctors]);
+  const patientItems = useMemo(() => patients.map((p) => ({ id: p.id as string, label: (p.fullName as string) || p.id as string, meta: `${p.phone || ''} ${p.nic || ''}`.trim() || undefined })), [patients]);
+  const serviceItems = useMemo(() => services.map((svc) => ({ id: svc.id as string, label: (svc.name as string) || svc.id as string, meta: `LKR ${svc.amount || 0}` })), [services]);
 
   return (
     <div className="space-y-4">
@@ -50,19 +52,9 @@ export const BillingPage = () => {
       <Card>
         <CardHeader title="Create Invoice" subtitle="Persisted in Firestore and visible in reports." />
         <div className="grid max-w-4xl gap-2 md:grid-cols-3">
-          <Input value={patientName} onChange={(e) => setPatientName(e.target.value)} placeholder="Patient name" />
-          <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
-            <option value="">Select doctor</option>
-            {doctors.map((doctor) => (
-              <option key={doctor.id} value={doctor.id}>{doctor.fullName}</option>
-            ))}
-          </Select>
-          <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
-            <option value="">Select service</option>
-            {services.map((service) => (
-              <option key={service.id} value={service.id}>{service.name} - {service.amount}</option>
-            ))}
-          </Select>
+          <Combobox label="Patient" value={selectedPatient} onChange={setSelectedPatient} items={patientItems} loading={patientsLoading} placeholder="Select patient" />
+          <Combobox label="Doctor" value={selectedDoctor} onChange={setSelectedDoctor} items={doctorItems} loading={doctorsLoading} placeholder="Select doctor" />
+          <Combobox label="Service" value={selectedService} onChange={setSelectedService} items={serviceItems} loading={servicesLoading} placeholder="Select service" />
           <Input value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Qty" type="number" min="1" />
           <Input value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="Discount" type="number" min="0" />
           <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">Line total: LKR {lineTotal.toLocaleString()}</div>
@@ -70,19 +62,20 @@ export const BillingPage = () => {
         <div className="mt-3 flex gap-2">
           <Button
             onClick={async () => {
-              if (!patientName || !selectedService) {
+              if (!selectedPatient || !selectedService) {
                 push('Patient and service are required', 'error');
                 return;
               }
               const res = await createInvoice(DEFAULT_CLINIC_ID, user?.uid || 'admin', user?.email, {
-                patientName,
+                patientId: selectedPatient.id,
+                patientName: selectedPatient.label,
                 doctorId: selectedDoctor?.id,
-                doctorName: selectedDoctor?.fullName,
+                doctorName: selectedDoctor?.label,
                 items: [{
                   serviceId: selectedService.id,
-                  name: selectedService.name,
+                  name: selectedService.label,
                   qty: Number(qty || 1),
-                  price: Number(selectedService.amount || 0),
+                  price: Number(serviceDoc?.amount || 0),
                 }],
                 discount: Number(discount || 0),
               });

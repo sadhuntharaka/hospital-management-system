@@ -10,9 +10,10 @@ import { TableSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { Toolbar } from '@/components/ui/Toolbar';
 import { useToast } from '@/components/ui/Toast';
-import { Select } from '@/components/ui/Select';
 import { useAuthContext } from '@/features/auth/AuthProvider';
 import { createAppointment, subscribeByClinic, updateAppointment } from '@/lib/clinicDb';
+import { Combobox } from '@/components/ui/Combobox';
+import { useDoctors, usePatients } from '@/hooks/useLookupData';
 
 const statusFilters = ['all', 'booked', 'arrived', 'in_consult', 'completed', 'cancelled'];
 
@@ -20,28 +21,28 @@ type DateFilter = 'today' | 'tomorrow' | 'week';
 
 export const AppointmentsPage = () => {
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [doctors, setDoctors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
-  const [patientName, setPatientName] = useState('');
-  const [doctorId, setDoctorId] = useState('');
+  const [selectedPatient, setSelectedPatient] = useState<{ id: string; label: string } | null>(null);
+  const [selectedDoctor, setSelectedDoctor] = useState<{ id: string; label: string } | null>(null);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState('');
   const debounced = useDebouncedValue(search, 250);
   const { push } = useToast();
   const { user } = useAuthContext();
 
+  const { data: doctors, loading: doctorsLoading } = useDoctors(DEFAULT_CLINIC_ID);
+  const { data: patients, loading: patientsLoading } = usePatients(DEFAULT_CLINIC_ID);
+
   useEffect(() => {
     const unsubA = subscribeByClinic(DEFAULT_CLINIC_ID, 'appointments', (rows) => {
       setAppointments(rows as any[]);
       setLoading(false);
     });
-    const unsubD = subscribeByClinic(DEFAULT_CLINIC_ID, 'doctors', (rows) => setDoctors(rows as any[]));
     return () => {
       unsubA();
-      unsubD();
     };
   }, []);
 
@@ -66,7 +67,8 @@ export const AppointmentsPage = () => {
     [appointments, debounced, status, dateFilter],
   );
 
-  const selectedDoctor = doctors.find((item) => item.id === doctorId);
+  const doctorItems = useMemo(() => doctors.map((d) => ({ id: d.id as string, label: (d.fullName as string) || d.id as string, meta: (d.specialty as string) || undefined })), [doctors]);
+  const patientItems = useMemo(() => patients.map((p) => ({ id: p.id as string, label: (p.fullName as string) || p.id as string, meta: `${p.phone || ''} ${p.nic || ''}`.trim() || undefined })), [patients]);
 
   return (
     <div className="space-y-4">
@@ -95,31 +97,41 @@ export const AppointmentsPage = () => {
         />
 
         <div className="mb-4 grid gap-2 rounded-md border p-3 md:grid-cols-5">
-          <Input placeholder="Patient name" value={patientName} onChange={(e) => setPatientName(e.target.value)} />
-          <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
-            <option value="">Select doctor</option>
-            {doctors.map((doctor) => (
-              <option key={doctor.id} value={doctor.id}>{doctor.fullName}</option>
-            ))}
-          </Select>
+          <Combobox
+            label="Patient"
+            value={selectedPatient}
+            onChange={setSelectedPatient}
+            items={patientItems}
+            loading={patientsLoading}
+            placeholder="Select patient"
+          />
+          <Combobox
+            label="Doctor"
+            value={selectedDoctor}
+            onChange={setSelectedDoctor}
+            items={doctorItems}
+            loading={doctorsLoading}
+            placeholder="Select doctor"
+          />
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
           <Button
             onClick={async () => {
-              if (!patientName.trim() || !doctorId) {
-                push('Patient name and doctor are required', 'error');
+              if (!selectedPatient || !selectedDoctor) {
+                push('Patient and doctor are required', 'error');
                 return;
               }
               await createAppointment(DEFAULT_CLINIC_ID, user?.uid || 'admin', user?.email, {
-                patientName,
-                doctorId,
-                doctorName: selectedDoctor?.fullName || doctorId,
+                patientId: selectedPatient.id,
+                patientName: selectedPatient.label,
+                doctorId: selectedDoctor.id,
+                doctorName: selectedDoctor.label,
                 date,
                 time,
                 status: 'booked',
               });
-              setPatientName('');
-              setDoctorId('');
+              setSelectedPatient(null);
+              setSelectedDoctor(null);
               setTime('');
               push('Appointment created', 'success');
             }}
