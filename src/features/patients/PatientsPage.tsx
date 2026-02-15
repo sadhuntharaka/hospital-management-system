@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -7,7 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuthContext } from '@/features/auth/AuthProvider';
-import { createPatient, listByClinic, updatePatient } from '@/lib/clinicDb';
+import { createPatient, subscribeByClinic, updatePatient } from '@/lib/clinicDb';
 import { DEFAULT_CLINIC_ID } from '@/lib/appConfig';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -36,11 +36,16 @@ export const PatientsPage = () => {
   const [showDrawer, setShowDrawer] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   const debouncedSearch = useDebouncedValue(search, 250);
-  const qc = useQueryClient();
-  const { data = [], isLoading } = useQuery({
-    queryKey: ['patients', DEFAULT_CLINIC_ID],
-    queryFn: () => listByClinic(DEFAULT_CLINIC_ID, 'patients'),
-  });
+  const [data, setData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = subscribeByClinic(DEFAULT_CLINIC_ID, 'patients', (rows) => {
+      setData(rows as any[]);
+      setIsLoading(false);
+    });
+    return unsub;
+  }, []);
   const form = useForm<PatientForm>({ resolver: zodResolver(schema), defaultValues: { fullName: '', nic: '', phone: '', patientCode: '' } });
 
   const watchedPhone = useWatch({ control: form.control, name: 'phone' });
@@ -63,9 +68,8 @@ export const PatientsPage = () => {
 
   const createMutation = useMutation({
     mutationFn: (payload: PatientForm) =>
-      createPatient(DEFAULT_CLINIC_ID, user?.uid || 'admin', payload),
+      createPatient(DEFAULT_CLINIC_ID, user?.uid || 'admin', payload, user?.email),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['patients'] });
       form.reset();
       setShowDrawer(false);
       push('Patient created', 'success');
@@ -74,9 +78,8 @@ export const PatientsPage = () => {
 
   const updateMutation = useMutation({
     mutationFn: (payload: PatientForm) =>
-      updatePatient(DEFAULT_CLINIC_ID, selectedPatient.id, payload),
+      updatePatient(DEFAULT_CLINIC_ID, selectedPatient.id, user?.uid || 'admin', payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['patients'] });
       form.reset();
       setSelectedPatient(null);
       setShowDrawer(false);
