@@ -12,7 +12,7 @@ Production-ready MVP scaffold using **React + Vite + TypeScript + Tailwind**, Fi
 - Pharmacy FEFO dispense transaction with stock movement writes
 - Admin/reporting/stock routes scaffolded for expansion
 - Firebase Firestore/Storage rules enforcing role-based access
-- Netlify functions: `createAdmin`, `createUser`, `generateInvoiceNumber`, `voidInvoice`
+- Netlify functions: `createAdmin`, `createUser`, `setClaims`, `generateInvoiceNumber`, `voidInvoice`
 - Seed CLI for first-run setup
 
 ## Firebase project values
@@ -75,6 +75,28 @@ POST `/.netlify/functions/createAdmin` with:
   "adminName": "Main Admin"
 }
 ```
+
+Response includes `{ uid, clinicId }`. Keep the `clinicId`; it is required for user recovery and role management.
+
+### First admin recovery (existing Auth user)
+If a Firebase Auth user exists but has no claims/profile doc, call `setClaims` as an authenticated admin from the same clinic.
+
+1. Sign in as an existing admin and get an ID token from the frontend app (or SDK).
+2. Run:
+```bash
+curl -X POST 'https://<your-site>.netlify.app/.netlify/functions/setClaims' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <ADMIN_ID_TOKEN>' \
+  --data '{
+    "uid": "OAFecvxfXYcivYCB5YLnCCuhQn02",
+    "clinicId": "<YOUR_CLINIC_ID>",
+    "role": "admin",
+    "email": "sadhuntharaka4@gmail.com",
+    "displayName": "Sadhun Tharaka"
+  }'
+```
+
+This sets custom claims and creates/updates: `clinics/<clinicId>/users/<uid>`.
 
 ### Option B: CLI
 ```bash
